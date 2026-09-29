@@ -1,6 +1,15 @@
 import { SortOrder } from './types';
 import { SYSTEM_COL_WIDTH } from './constants';
-import type { CSSObject, ConditionalStyles, TableColumn, Format, TableRow, Selector, SortFunction } from './types';
+import type {
+	CSSObject,
+	ConditionalStyles,
+	TableColumn,
+	Format,
+	TableRow,
+	Selector,
+	SortFunction,
+	Primitive,
+} from './types';
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
 	return val !== null && typeof val === 'object' && !Array.isArray(val);
@@ -32,6 +41,35 @@ export function isEmpty(field: string | number | undefined = ''): boolean {
 	return !field || field.length === 0;
 }
 
+function compareBySelector<T>(a: T, b: T, selector: Selector<T>, direction: SortOrder): number {
+	const flip = direction === SortOrder.ASC ? 1 : -1;
+	const aValue = selector(a);
+	const bValue = selector(b);
+
+	// Nullish values always sort to the end regardless of direction.
+	const aNull = aValue == null;
+	const bNull = bValue == null;
+	if (aNull || bNull) {
+		if (aNull && bNull) {
+			return 0;
+		}
+		return aNull ? 1 : -1;
+	}
+
+	if (aValue < bValue) {
+		return -1 * flip;
+	}
+	if (aValue > bValue) {
+		return 1 * flip;
+	}
+	return 0;
+}
+
+// Constant selector passed to a table-level sortFunction when no column is selected
+// (the "not sorted" state), so custom sort functions can still run — e.g. to keep
+// pinned rows on top — without a real field to compare by.
+const noopSelector: Selector<unknown> = () => 0;
+
 export function sort<T>(
 	rows: T[],
 	selector: Selector<T> | null | undefined,
@@ -39,6 +77,9 @@ export function sort<T>(
 	sortFn?: SortFunction<T> | null,
 ): T[] {
 	if (!selector) {
+		if (sortFn && typeof sortFn === 'function') {
+			return sortFn(rows.slice(0), noopSelector as Selector<T>, direction);
+		}
 		return rows;
 	}
 
@@ -47,40 +88,56 @@ export function sort<T>(
 		return sortFn(rows.slice(0), selector, direction);
 	}
 
-	return rows.slice(0).sort((a: T, b: T) => {
-		const aValue = selector(a);
-		const bValue = selector(b);
+	return rows.slice(0).sort((a, b) => compareBySelector(a, b, selector, direction));
+}
 
-		if (direction === 'asc') {
-			if (aValue < bValue) {
-				return -1;
+/**
+ * Stable multi-column sort. Compares rows by each sort column in priority order,
+ * falling back to the next column when the current one ties. Honors each column's
+ * `sortFunction` when provided, otherwise compares its `selector` value.
+ */
+export function multiSort<T>(rows: T[], sortColumns: { column: TableColumn<T>; sortDirection: SortOrder }[]): T[] {
+	if (sortColumns.length === 0) {
+		return rows;
+	}
+
+	return rows
+		.map((row, index) => ({ row, index }))
+		.sort((a, b) => {
+			for (const { column, sortDirection } of sortColumns) {
+				const flip = sortDirection === SortOrder.ASC ? 1 : -1;
+
+				if (column.sortFunction && typeof column.sortFunction === 'function') {
+					const result = column.sortFunction(a.row, b.row);
+					if (result !== 0) {
+						return result * flip;
+					}
+					continue;
+				}
+
+				const selector = column.selector as Selector<T> | undefined;
+				if (!selector) {
+					continue;
+				}
+
+				const result = compareBySelector(a.row, b.row, selector, sortDirection);
+				if (result !== 0) {
+					return result;
+				}
 			}
 
-			if (aValue > bValue) {
-				return 1;
-			}
-		}
-
-		if (direction === 'desc') {
-			if (aValue > bValue) {
-				return -1;
-			}
-
-			if (aValue < bValue) {
-				return 1;
-			}
-		}
-
-		return 0;
-	});
+			// Stable tiebreaker: preserve the original order.
+			return a.index - b.index;
+		})
+		.map(({ row }) => row);
 }
 
 export function getProperty<T>(
 	row: T,
-	selector: ((row: T, rowIndex?: number) => React.ReactNode) | undefined | null,
+	selector: ((row: T, rowIndex?: number) => Primitive | React.ReactNode) | undefined | null,
 	format: Format<T> | undefined | null,
 	rowIndex: number,
-): React.ReactNode {
+): Primitive | React.ReactNode {
 	if (!selector) {
 		return null;
 	}
@@ -91,6 +148,18 @@ export function getProperty<T>(
 	}
 
 	return selector(row, rowIndex);
+}
+
+// bigint and Date are valid Primitives but not part of React's ReactNode type.
+// Coerce them to renderable text at the JSX boundary.
+export function toReactNode(value: Primitive | React.ReactNode): React.ReactNode {
+	if (typeof value === 'bigint') {
+		return value.toString();
+	}
+	if (value instanceof Date) {
+		return value.toLocaleString();
+	}
+	return value as React.ReactNode;
 }
 
 export function insertItem<T>(array: T[] = [], item: T, index = 0): T[] {
@@ -146,20 +215,15 @@ export function handleFunctionProps(
 	object: { [key: string]: unknown },
 	...args: unknown[]
 ): { [key: string]: unknown } {
-	let newObject;
+	let resolved: { [key: string]: unknown } | undefined;
 
-	Object.keys(object)
-		.map(o => object[o])
-		.forEach((value, index) => {
-			const oldObject = object;
+	for (const [key, value] of Object.entries(object)) {
+		if (typeof value === 'function') {
+			resolved = { ...(resolved ?? object), [key]: value(...args) };
+		}
+	}
 
-			if (typeof value === 'function') {
-				newObject = { ...oldObject, [Object.keys(object)[index]]: value(...args) };
-				// delete oldObject[value];
-			}
-		});
-
-	return newObject || object;
+	return resolved ?? object;
 }
 
 export function getNumberOfPages(rowCount: number, rowsPerPage: number): number {
@@ -219,8 +283,17 @@ export function isRowSelected<T>(row: T, selectedRows: T[] = [], keyField = 'id'
 	return selectedRows.some(r => r === row);
 }
 
-export function isOdd(num: number): boolean {
+export function isEven(num: number): boolean {
 	return num % 2 === 0;
+}
+
+/** Number of system cells (selection checkbox, expander) rendered before data columns. */
+export function getPrefixColCount(
+	selectableRows: boolean,
+	expandableRows: boolean,
+	expandableRowsHideExpander: boolean,
+): number {
+	return (selectableRows ? 1 : 0) + (expandableRows && !expandableRowsHideExpander ? 1 : 0);
 }
 
 export function findColumnIndexById<T>(columns: TableColumn<T>[], id: string | undefined): number {
@@ -231,6 +304,11 @@ export function findColumnIndexById<T>(columns: TableColumn<T>[], id: string | u
 	return columns.findIndex(c => {
 		return equalizeId(c.id, id);
 	});
+}
+
+// Whitespace would split an aria-labelledby IDREF list.
+export function getColumnNameId(tableId: string, columnId: string | number | undefined): string {
+	return `${tableId}-col-${String(columnId).replace(/\s/g, '_')}-name`;
 }
 
 export function equalizeId(a: string | number | undefined, b: string | number | undefined): boolean {
@@ -245,7 +323,9 @@ export type PinnedOffsets = {
 export const EMPTY_PINNED_OFFSETS: PinnedOffsets = { left: {}, right: {} };
 
 function resolveColumnWidth<T>(col: TableColumn<T>, columnWidths: Record<string | number, number>): number {
-	if (col.id != null && columnWidths[col.id] != null) return columnWidths[col.id];
+	if (col.id != null && columnWidths[col.id] != null) {
+		return columnWidths[col.id];
+	}
 	const raw = col.width ?? col.minWidth ?? '100px';
 	const n = parseFloat(raw);
 	return isNaN(n) ? 100 : n;
@@ -258,10 +338,14 @@ function resolveColumnWidth<T>(col: TableColumn<T>, columnWidths: Record<string 
  * keep pinned columns aligned without code changes to this library.
  */
 function resolveSystemColWidth(): number {
-	if (typeof window === 'undefined' || typeof document === 'undefined') return SYSTEM_COL_WIDTH;
+	if (typeof window === 'undefined' || typeof document === 'undefined') {
+		return SYSTEM_COL_WIDTH;
+	}
 	const root = document.querySelector('.rdt_table') ?? document.documentElement;
 	const raw = getComputedStyle(root).getPropertyValue('--rdt-system-col-width').trim();
-	if (!raw) return SYSTEM_COL_WIDTH;
+	if (!raw) {
+		return SYSTEM_COL_WIDTH;
+	}
 	const n = parseFloat(raw);
 	return isNaN(n) ? SYSTEM_COL_WIDTH : n;
 }
@@ -275,24 +359,28 @@ export function getPinnedOffsets<T>(
 ): PinnedOffsets {
 	const visible = columns.filter(c => !c.omit);
 	const hasPinned = visible.some(c => c.pinned);
-	if (!hasPinned) return EMPTY_PINNED_OFFSETS;
+	if (!hasPinned) {
+		return EMPTY_PINNED_OFFSETS;
+	}
 
 	const systemWidth = resolveSystemColWidth();
-	let baseLeft = 0;
-	if (selectableRows) baseLeft += systemWidth;
-	if (expandableRows && !expandableRowsHideExpander) baseLeft += systemWidth;
+	const baseLeft = getPrefixColCount(selectableRows, expandableRows, expandableRowsHideExpander) * systemWidth;
 
 	const left: Record<string | number, number> = {};
 	let leftAcc = baseLeft;
 	for (const col of visible.filter(c => c.pinned === 'left')) {
-		if (col.id != null) left[col.id] = leftAcc;
+		if (col.id != null) {
+			left[col.id] = leftAcc;
+		}
 		leftAcc += resolveColumnWidth(col, columnWidths);
 	}
 
 	const right: Record<string | number, number> = {};
 	let rightAcc = 0;
 	for (const col of [...visible.filter(c => c.pinned === 'right')].reverse()) {
-		if (col.id != null) right[col.id] = rightAcc;
+		if (col.id != null) {
+			right[col.id] = rightAcc;
+		}
 		rightAcc += resolveColumnWidth(col, columnWidths);
 	}
 
@@ -308,12 +396,12 @@ export function getPinnedTotalWidths<T>(
 ): { left: number; right: number } {
 	const visible = columns.filter(c => !c.omit);
 	const hasPinned = visible.some(c => c.pinned);
-	if (!hasPinned) return { left: 0, right: 0 };
+	if (!hasPinned) {
+		return { left: 0, right: 0 };
+	}
 
 	const systemWidth = resolveSystemColWidth();
-	let left = 0;
-	if (selectableRows) left += systemWidth;
-	if (expandableRows && !expandableRowsHideExpander) left += systemWidth;
+	let left = getPrefixColCount(selectableRows, expandableRows, expandableRowsHideExpander) * systemWidth;
 	for (const col of visible.filter(c => c.pinned === 'left')) {
 		left += resolveColumnWidth(col, columnWidths);
 	}
@@ -340,7 +428,29 @@ export type PinnedCellMeta = {
 	className: string;
 };
 
-export function getPinnedCellMeta<T>(column: TableColumn<T>, pinnedOffsets: PinnedOffsets | undefined): PinnedCellMeta {
+// Logical insets so pin bands mirror under RTL: 'left' pins stick to the
+// inline-start edge (physical right in RTL), 'right' pins to inline-end.
+function getPinnedStyle(
+	pinnedLeft: boolean,
+	pinnedRight: boolean,
+	offsets: PinnedOffsets,
+	id: string | number | undefined,
+	zIndex?: number,
+): React.CSSProperties {
+	if (pinnedLeft) {
+		return { position: 'sticky', insetInlineStart: offsets.left[id!], ...(zIndex != null && { zIndex }) };
+	}
+	if (pinnedRight) {
+		return { position: 'sticky', insetInlineEnd: offsets.right[id!], ...(zIndex != null && { zIndex }) };
+	}
+	return {};
+}
+
+export function getPinnedCellMeta<T>(
+	column: TableColumn<T>,
+	pinnedOffsets: PinnedOffsets | undefined,
+	zIndex?: number,
+): PinnedCellMeta {
 	const offsets = pinnedOffsets ?? EMPTY_PINNED_OFFSETS;
 	const id = column.id;
 	const pinnedLeft = column.pinned === 'left' && id != null && offsets.left[id] != null;
@@ -355,11 +465,7 @@ export function getPinnedCellMeta<T>(column: TableColumn<T>, pinnedOffsets: Pinn
 	const isLastLeftPin = pinnedLeft && id != null && offsets.left[id] === maxLeft;
 	const isFirstRightPin = pinnedRight && id != null && offsets.right[id] === maxRight;
 
-	const style: React.CSSProperties = pinnedLeft
-		? { position: 'sticky', left: offsets.left[id!] }
-		: pinnedRight
-			? { position: 'sticky', right: offsets.right[id!] }
-			: {};
+	const style = getPinnedStyle(pinnedLeft, pinnedRight, offsets, id, zIndex);
 
 	const className = [
 		pinnedLeft && 'rdt_pinLeft',
@@ -373,15 +479,42 @@ export function getPinnedCellMeta<T>(column: TableColumn<T>, pinnedOffsets: Pinn
 	return { pinnedLeft, pinnedRight, isLastLeftPin, isFirstRightPin, style, className };
 }
 
-/**
- * After a column reorder, reassigns `pinned` based purely on position:
- * - The first N columns (where N = original left-pin count) become `pinned: 'left'`
- * - The last M columns (where M = original right-pin count) become `pinned: 'right'`
- * - Everything between them has `pinned` removed
- *
- * This enforces that pinned columns always form contiguous edges, and that
- * dragging a column into a pinned zone pins it while dragging one out unpins it.
- */
+/** ID of the first (leftmost) non-omitted right-pinned column — a spacer is
+ * injected just before it so non-pinned cells fill the space up to the pins. */
+export function getFirstRightPinnedId<T>(columns: TableColumn<T>[]): string | number | null {
+	for (const col of columns) {
+		if (!col.omit && col.pinned === 'right') {
+			return col.id ?? null;
+		}
+	}
+	return null;
+}
+
+/** Width cell props for body/footer cells: a resize override locks the cell to
+ * the resized width and disables flex-grow; otherwise the column's own values apply. */
+export function getCellWidthProps<T>(
+	column: TableColumn<T>,
+	resizedWidth: number | undefined,
+): { grow: number | undefined; width: string | undefined; minWidth: string | undefined; maxWidth: string | undefined } {
+	const px = resizedWidth != null ? `${resizedWidth}px` : undefined;
+	return {
+		grow: px != null ? 0 : column.grow,
+		width: px ?? column.width,
+		minWidth: px ?? column.minWidth,
+		maxWidth: px ?? column.maxWidth,
+	};
+}
+
+/** Roving tabindex: with cell navigation on, the grid is a single Tab stop and only
+ * the active cell is tabbable. Off, the element opts out of tabindex entirely. */
+export function getRovingTabIndex(navEnabled: boolean, isActive: boolean): number | undefined {
+	if (!navEnabled) {
+		return undefined;
+	}
+
+	return isActive ? 0 : -1;
+}
+
 /**
  * Assigns pin state based on position and explicit pin zones.
  *
@@ -399,7 +532,9 @@ export function normalizePins<T>(
 	if (pinZoneMap) {
 		return cols.map((col, i) => {
 			const zone = pinZoneMap[i];
-			if (zone) return { ...col, pinned: zone };
+			if (zone) {
+				return { ...col, pinned: zone };
+			}
 			const { pinned: _removed, ...rest } = col;
 			return rest as TableColumn<T>;
 		});
@@ -413,8 +548,12 @@ export function normalizePins<T>(
 	}
 
 	return cols.map((col, i) => {
-		if (i < leftCount) return { ...col, pinned: 'left' };
-		if (rightCount > 0 && i >= cols.length - rightCount) return { ...col, pinned: 'right' };
+		if (i < leftCount) {
+			return { ...col, pinned: 'left' };
+		}
+		if (rightCount > 0 && i >= cols.length - rightCount) {
+			return { ...col, pinned: 'right' };
+		}
 		const { pinned: _removed, ...rest } = col;
 		return rest as TableColumn<T>;
 	});
@@ -433,7 +572,48 @@ export function getPinZoneForIndex(
 	rightCount: number,
 	total: number,
 ): 'left' | 'right' | undefined {
-	if (index < leftCount) return 'left';
-	if (index >= total - rightCount) return 'right';
+	if (index < leftCount) {
+		return 'left';
+	}
+	if (index >= total - rightCount) {
+		return 'right';
+	}
 	return undefined;
+}
+
+/**
+ * Pins or unpins a column by id, moving it into the matching edge zone so pinned
+ * columns stay contiguous — the same invariant drag-reorder maintains via normalizePins.
+ * Pin left inserts at the end of the left zone, pin right at the start of the right
+ * zone, and unpin drops the column just inside its former zone's boundary.
+ * Returns the input array untouched when the id is unknown.
+ */
+export function setColumnPin<T>(
+	columns: TableColumn<T>[],
+	columnId: string | number,
+	side?: 'left' | 'right',
+): TableColumn<T>[] {
+	const idx = findColumnIndexById(columns, String(columnId));
+	if (idx === -1) {
+		return columns;
+	}
+
+	const next = [...columns];
+	const [col] = next.splice(idx, 1);
+	const { pinned: _removed, ...rest } = col;
+	const updated = (side ? { ...rest, pinned: side } : rest) as TableColumn<T>;
+
+	const leftCount = next.filter(c => c.pinned === 'left').length;
+	const rightCount = next.filter(c => c.pinned === 'right').length;
+	let insertAt: number;
+	if (side === 'left') {
+		insertAt = leftCount;
+	} else if (side === 'right') {
+		insertAt = next.length - rightCount;
+	} else {
+		insertAt = col.pinned === 'right' ? next.length - rightCount : leftCount;
+	}
+
+	next.splice(insertAt, 0, updated);
+	return next;
 }

@@ -8,6 +8,8 @@ import ColumnExpander from './TableColExpander';
 import RightPinSpacer from './RightPinSpacer';
 import { CellBase } from './Cell';
 import { buildGridTemplateColumns, buildGroupHeaderCells, type GroupDragProps } from './dataTableHeadHelpers';
+import { getColumnNameId, getFirstRightPinnedId, getPrefixColCount } from '../util';
+import { flipElement } from '../dom';
 import type { TableColumn, ColumnGroup } from '../types';
 import { emptyFilterState } from '../hooks/useColumnFilter';
 import { useHeadContext } from '../context/HeadContext';
@@ -28,45 +30,30 @@ function DataTableHead<T>({
 	expandableRowsHideExpander,
 }: DataTableHeadProps<T>): JSX.Element {
 	const {
-		selectedColumn,
-		sortDirection,
-		sortIcon,
-		sortServer,
-		pagination,
-		paginationServer,
-		persistSelectedOnSort,
-		selectableRowsVisibleOnly,
-		showSelectAll,
-		progressPending,
-		sortedData,
+		tableId,
+		sorting,
+		selectAll,
 		fixedHeader,
 		dense,
 		draggingColumnId,
 		draggingGroupKey,
-		filterValues,
+		filtering,
 		columnWidths,
 		pinnedOffsets,
-		resizable,
-		onSort,
-		onFilterChange,
-		onResizeStart,
-		onDragStart,
-		onDragOver,
-		onDragEnd,
-		onDragEnter,
-		onDragLeave,
-		onGroupDragStart,
-		onGroupDragEnter,
-		onGroupDragOver,
-		onGroupDragEnd,
+		resize,
+		cellNavigation,
+		activeCell,
+		headerMenu,
+		columnDrag,
 	} = useHeadContext<T>();
 
 	const groupDragProps: GroupDragProps = {
 		draggingGroupKey,
-		onGroupDragStart,
-		onGroupDragEnter,
-		onGroupDragOver,
-		onGroupDragEnd,
+		onGroupDragStart: columnDrag.onGroupDragStart,
+		onGroupDragEnter: columnDrag.onGroupDragEnter,
+		onGroupDragOver: columnDrag.onGroupDragOver,
+		onGroupDragEnd: columnDrag.onGroupDragEnd,
+		onGroupPointerDown: columnDrag.onGroupPointerDown,
 	};
 
 	const visibleColumns = columns.filter(c => !c.omit);
@@ -81,7 +68,9 @@ function DataTableHead<T>({
 
 	useIsomorphicLayoutEffect(() => {
 		const container = containerRef.current;
-		if (!container) return;
+		if (!container) {
+			return;
+		}
 		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 		const animate = isMounted.current;
 		isMounted.current = true;
@@ -90,20 +79,11 @@ function DataTableHead<T>({
 			const newLeft = el.getBoundingClientRect().left;
 			const prevLeft = savedPositions.current.get(key);
 			savedPositions.current.set(key, newLeft);
-			if (!animate || reducedMotion || prevLeft == null || Math.abs(prevLeft - newLeft) < 1) return;
+			if (!animate || reducedMotion || prevLeft == null || Math.abs(prevLeft - newLeft) < 1) {
+				return;
+			}
 
-			const delta = prevLeft - newLeft;
-			el.style.transform = `translateX(${delta}px)`;
-			el.style.transition = 'none';
-			el.getBoundingClientRect(); // force reflow
-			el.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)';
-			el.style.transform = '';
-			const onEnd = () => {
-				el.style.transform = '';
-				el.style.transition = '';
-				el.removeEventListener('transitionend', onEnd);
-			};
-			el.addEventListener('transitionend', onEnd);
+			flipElement(el, prevLeft - newLeft, 'X', 0.2);
 		};
 
 		container.querySelectorAll<HTMLElement>('[data-column-id]').forEach(el => {
@@ -120,12 +100,13 @@ function DataTableHead<T>({
 			mounted.current = false;
 			positions.clear();
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [columnOrder, groupOrder]);
 
 	// Count of non-omitted columns each group spans
 	const groupColSpans = React.useMemo(() => {
-		if (!columnGroups) return {};
+		if (!columnGroups) {
+			return {};
+		}
 		const map: Record<string, number> = {};
 		for (const group of columnGroups) {
 			map[String(group.name)] = group.columnIds.filter(id =>
@@ -137,46 +118,39 @@ function DataTableHead<T>({
 
 	// IDs of columns not covered by any group
 	const ungroupedIds = React.useMemo(() => {
-		if (!columnGroups) return new Set<string>();
+		if (!columnGroups) {
+			return new Set<string>();
+		}
 		const covered = new Set(([] as (string | number)[]).concat(...columnGroups.map(g => g.columnIds)).map(String));
 		return new Set(visibleColumns.map(c => String(c.id)).filter(id => !covered.has(id)));
 	}, [columnGroups, visibleColumns]);
 
-	const prefixColCount = (selectableRows ? 1 : 0) + (expandableRows && !expandableRowsHideExpander ? 1 : 0);
+	const prefixColCount = getPrefixColCount(selectableRows, expandableRows, expandableRowsHideExpander);
 
 	// ── Shared column props ──────────────────────────────────────────────────
 	const colProps = (column: TableColumn<T>) => ({
 		column,
-		selectedColumn,
-		disabled: progressPending || sortedData.length === 0,
-		pagination,
-		paginationServer,
-		persistSelectedOnSort,
-		selectableRowsVisibleOnly,
-		sortDirection,
-		sortIcon,
-		sortServer,
-		filterValue: filterValues[column.id!] ?? emptyFilterState(column.filterType),
+		nameId: getColumnNameId(tableId, column.id),
+		disabled: sorting.sortDisabled,
+		sorting,
+		// Per-column extraction keeps TableCol's memo per-column: only the filtered
+		// column re-renders when a filter is applied.
+		filterValue: filtering.filterValues[column.id!] ?? emptyFilterState(column.filterType),
+		filterLocalization: filtering.localization,
 		resizedWidth: columnWidths[column.id!],
-		onSort,
-		onFilterChange,
-		onResizeStart: resizable ? onResizeStart : undefined,
+		onFilterChange: filtering.onFilterChange,
+		getDistinctValues: filtering.getDistinctValues,
+		onResizeStart: resize?.onResizeStart,
 		pinnedOffsets,
-		onDragStart,
-		onDragOver,
-		onDragEnd,
-		onDragEnter,
-		onDragLeave,
+		columnDrag,
 		draggingColumnId,
+		cellNavigation,
+		activeCell,
+		navCol: prefixColCount + visibleColumns.indexOf(column),
+		headerMenu,
 	});
 
-	// First right-pinned column id — spacer is injected before it in flex layout
-	const firstRightPinnedId = React.useMemo(() => {
-		for (const col of columns) {
-			if (!col.omit && col.pinned === 'right') return col.id;
-		}
-		return null;
-	}, [columns]);
+	const firstRightPinnedId = React.useMemo(() => getFirstRightPinnedId(columns), [columns]);
 
 	// ── CSS Grid layout (when columnGroups are present) ──────────────────────
 	if (hasGroups) {
@@ -184,22 +158,25 @@ function DataTableHead<T>({
 
 		// Expander column index (1-based grid column)
 		let expanderGridCol = 0;
-		if (selectableRows) expanderGridCol = 2;
-		else if (expandableRows && !expandableRowsHideExpander) expanderGridCol = 1;
+		if (selectableRows) {
+			expanderGridCol = 2;
+		} else if (expandableRows && !expandableRowsHideExpander) {
+			expanderGridCol = 1;
+		}
 
 		return (
 			<Head className="rdt_TableHead" role="rowgroup" $fixedHeader={fixedHeader}>
 				<div
 					ref={containerRef}
 					className={['rdt_headGrid', dense && 'rdt_headGridDense'].filter(Boolean).join(' ')}
-					role="presentation"
+					role="row"
 					style={{ gridTemplateColumns }}
 				>
 					{/* ── Prefix cells — span both grid rows ── */}
 					{selectableRows && (
 						<div style={{ gridColumn: '1', gridRow: '1 / span 2', display: 'flex', alignItems: 'stretch' }}>
-							{showSelectAll ? (
-								<CellBase style={{ flex: '0 0 var(--rdt-system-col-width, 48px)', width: '100%' }} />
+							{selectAll?.hideSelectAll ? (
+								<CellBase role="cell" style={{ flex: '0 0 var(--rdt-system-col-width, 48px)', width: '100%' }} />
 							) : (
 								<ColumnCheckbox />
 							)}
@@ -262,7 +239,11 @@ function DataTableHead<T>({
 		<Head className="rdt_TableHead" role="rowgroup" $fixedHeader={fixedHeader}>
 			<HeadRow ref={containerRef} className="rdt_TableHeadRow" role="row" $dense={dense}>
 				{selectableRows &&
-					(showSelectAll ? <CellBase style={{ flex: '0 0 var(--rdt-system-col-width, 48px)' }} /> : <ColumnCheckbox />)}
+					(selectAll?.hideSelectAll ? (
+						<CellBase role="cell" style={{ flex: '0 0 var(--rdt-system-col-width, 48px)' }} />
+					) : (
+						<ColumnCheckbox />
+					))}
 
 				{expandableRows && !expandableRowsHideExpander && <ColumnExpander />}
 

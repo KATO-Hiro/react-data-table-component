@@ -1,0 +1,106 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: 'Comparisons: TanStack Table, AG Grid, MUI X, MUI Table | react-data-table-component'
+description: 'How react-data-table-component compares to TanStack Table, AG Grid Community, MUI X Data Grid, and the plain @mui/material Table: setup effort, bundle size, features, and pricing.'
+---
+
+# How react-data-table-component compares
+
+All five options on this page are solid, actively maintained choices. They differ in how much you assemble yourself, what ships free, and what ecosystem they assume. This page gives you the honest picture so you can pick the right tool, even if it is not this one.
+
+The short version: react-data-table-component is a **full component**. You pass `columns` and `data` and get a styled, sortable, paginated table with selection, expandable rows, and theming. Nothing is gated behind a paid tier.
+
+---
+
+## react-data-table-component vs TanStack Table
+
+TanStack Table is **headless**: it manages table state (sorting, pagination, selection, expansion) and you write every piece of markup and CSS yourself. That is its superpower, total render control, and its cost, you build the UI.
+
+Choose **TanStack Table** when:
+
+- You need pixel-level control over markup and styling
+- Your design system dictates exactly how tables must render
+- Bundle size is critical (~15 KB min+gzip)
+
+Choose **react-data-table-component** when:
+
+- You want a working, styled table without building the UI layer
+- Sorting, pagination, and selection should come with their controls included
+- You want built-in themes and dark mode instead of writing CSS
+
+## react-data-table-component vs AG Grid
+
+AG Grid Community is a full-featured data grid with sorting, pagination, selection, and built-in themes included free. It is the heavyweight option: ~338 KB min+gzip, with advanced features such as master/detail (expandable rows), pivoting, and the server-side row model reserved for the commercial AG Grid Enterprise license.
+
+Choose **AG Grid** when:
+
+- You need enterprise grid features: pivoting, row grouping, Excel export, master/detail
+- You are rendering very large datasets and need built-in row virtualization
+- An Enterprise license is within budget for gated features
+
+Choose **react-data-table-component** when:
+
+- You need a table, not a spreadsheet engine
+- Expandable rows should be free, not part of a paid tier
+- A ~35 KB footprint fits your app better than ~338 KB
+
+## react-data-table-component vs MUI X Data Grid
+
+MUI X Data Grid is the natural choice inside a Material UI application. The Community version includes sorting, pagination, and selection, and it inherits your MUI theme. It requires the MUI ecosystem (`@mui/material`, `@mui/system`, Emotion) as peer dependencies, and features such as master/detail panels are part of the paid Pro tier.
+
+Choose **MUI X Data Grid** when:
+
+- Your app is already built on Material UI
+- You want the grid to inherit your existing MUI theme automatically
+- Pro or Premium features fit your budget when you need them
+
+Choose **react-data-table-component** when:
+
+- You want the Material look without adopting Material UI: the built-in `material` theme matches MUI's table styling with zero `@mui/material`/Emotion dependency
+- You are already on Material UI but don't want to add `@mui/x-data-grid` (and its Pro/Premium tier) for one component: the `material` theme gives you a matching table without the extra dependency
+- You want zero runtime dependencies
+- Expandable rows and theming should work out of the box, free
+
+## react-data-table-component vs Material UI Table
+
+`@mui/material`'s plain `Table` (paired with `TableHead`, `TableBody`, `TableRow`, `TableCell`, `TablePagination`) is free and ships with core Material UI, no `@mui/x-data-grid` purchase or package required. It is the **atomic** option: the primitives are styled and theme-aware, but sorting, pagination, and selection are not implemented for you, you wire up the state and event handlers yourself, similar to TanStack Table but with Material markup instead of plain HTML.
+
+Choose **Material UI Table** when:
+
+- You want Material-styled table primitives that you compose and control yourself
+- Your app is already on Material UI and the table is simple enough that hand-rolling sorting/pagination isn't much work
+- You don't need built-in sorting, pagination, or selection logic
+
+Choose **react-data-table-component** when:
+
+- You want sorting, pagination, selection, and expandable rows working out of the box instead of hand-rolled
+- You want the Material look (via the built-in `material` theme) without requiring `@mui/material` + Emotion as dependencies
+- You want one component that can switch between multiple themes, not just Material
+
+---
+
+## Feature comparison
+
+| | TanStack Table | AG Grid Community | MUI X Data Grid | Material UI Table | react-data-table-component |
+| --- | --- | --- | --- | --- | --- |
+| Approach | Headless | Full data grid | Full data grid | Atomic primitives | Full component |
+| Styled table out of the box | You build the UI | ✓ | ✓ | ✓ (primitives only) | ✓ |
+| Sorting, pagination & selection UI | State only | ✓ | ✓ | You build both | ✓ |
+| Expandable row panels | State only | Enterprise tier | Pro tier | You build it | ✓ |
+| Dark mode & themes | Bring your own | ✓ built-in | Via MUI theme | Via MUI theme | 5 built-in, including a Material-matching theme |
+| Requires a UI framework | No | No | @mui/material + Emotion | @mui/material + Emotion | No |
+| Row virtualization | Via TanStack Virtual | ✓ built-in | ✓ built-in | Manual | ✗ (paginate instead) |
+| Size (min+gzip) | ~15 KB | ~338 KB | ~117 KB + MUI | ~147 KB (MUI core) | ~35 KB |
+| Paid tiers | None | Enterprise | Pro & Premium | None | None |
+
+Sizes measured via Bundlephobia, July 2026 (TanStack v8.21, AG Grid v36, MUI X v9.8, @mui/material v9.2).
+
+## Which should you choose?
+
+- **Full render control, smallest bundle:** TanStack Table
+- **Spreadsheet-grade features and virtualized big data:** AG Grid
+- **Already on Material UI and need Pro/Premium features like master/detail:** MUI X Data Grid
+- **Already on Material UI, table is simple, and you don't mind wiring up sorting/pagination yourself:** Material UI Table
+- **A fully-featured, production-ready table, including sorting, pagination, selection, expandable rows, and a Material-matching theme, with nothing gated behind a paid tier:** react-data-table-component
+
+See [Getting Started](/docs/getting-started) to try it, or the [live demo](/) on the homepage.

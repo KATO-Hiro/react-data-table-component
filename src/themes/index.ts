@@ -30,6 +30,7 @@ export function themeToVars(theme: Theme): Record<string, string> {
 		'--rdt-color-bg': theme.background.default,
 		'--rdt-color-context-bg': theme.context.background,
 		...(theme.background.header ? { '--rdt-color-header-bg': theme.background.header } : {}),
+		...(theme.background.footer ? { '--rdt-color-footer-bg': theme.background.footer } : {}),
 		'--rdt-color-context-text': theme.context.text,
 		'--rdt-color-divider': theme.divider.default,
 		'--rdt-color-btn': theme.button.default,
@@ -44,16 +45,36 @@ export function themeToVars(theme: Theme): Record<string, string> {
 		'--rdt-color-striped-text': theme.striped.text,
 	};
 
-	if (theme.spacing?.rowHeight != null) vars['--rdt-row-height'] = theme.spacing.rowHeight;
-	if (theme.spacing?.headerHeight != null) vars['--rdt-header-height'] = theme.spacing.headerHeight;
-	if (theme.spacing?.cellPaddingX != null) vars['--rdt-cell-padding-x'] = theme.spacing.cellPaddingX;
-	if (theme.spacing?.iconSize != null) vars['--rdt-icon-size'] = theme.spacing.iconSize;
-	if (theme.typography?.fontSize != null) vars['--rdt-font-size'] = theme.typography.fontSize;
-	if (theme.typography?.fontSizeHeader != null) vars['--rdt-font-size-header'] = theme.typography.fontSizeHeader;
-	if (theme.typography?.fontFamily != null) vars['--rdt-font-family'] = theme.typography.fontFamily;
-	if (theme.shape?.borderRadius != null) vars['--rdt-border-radius'] = theme.shape.borderRadius;
-	if (theme.checkbox?.size != null) vars['--rdt-checkbox-size'] = theme.checkbox.size;
-	if (theme.checkbox?.borderRadius != null) vars['--rdt-checkbox-radius'] = theme.checkbox.borderRadius;
+	if (theme.spacing?.rowHeight != null) {
+		vars['--rdt-row-height'] = theme.spacing.rowHeight;
+	}
+	if (theme.spacing?.headerHeight != null) {
+		vars['--rdt-header-height'] = theme.spacing.headerHeight;
+	}
+	if (theme.spacing?.cellPaddingX != null) {
+		vars['--rdt-cell-padding-x'] = theme.spacing.cellPaddingX;
+	}
+	if (theme.spacing?.iconSize != null) {
+		vars['--rdt-icon-size'] = theme.spacing.iconSize;
+	}
+	if (theme.typography?.fontSize != null) {
+		vars['--rdt-font-size'] = theme.typography.fontSize;
+	}
+	if (theme.typography?.fontSizeHeader != null) {
+		vars['--rdt-font-size-header'] = theme.typography.fontSizeHeader;
+	}
+	if (theme.typography?.fontFamily != null) {
+		vars['--rdt-font-family'] = theme.typography.fontFamily;
+	}
+	if (theme.shape?.borderRadius != null) {
+		vars['--rdt-border-radius'] = theme.shape.borderRadius;
+	}
+	if (theme.checkbox?.size != null) {
+		vars['--rdt-checkbox-size'] = theme.checkbox.size;
+	}
+	if (theme.checkbox?.borderRadius != null) {
+		vars['--rdt-checkbox-radius'] = theme.checkbox.borderRadius;
+	}
 
 	return vars;
 }

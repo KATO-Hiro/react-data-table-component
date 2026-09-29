@@ -7,6 +7,10 @@
 	width: 100%;
 	height: 100%;
 	max-width: 100%;
+	/* When columns overflow the responsive wrapper, grow to the scrolled content
+	   width so row/table backgrounds paint across every column instead of ending
+	   at the container width. Wins over max-width per the min/max-width rules. */
+	min-width: fit-content;
 	color: var(--rdt-color-text-primary, rgba(0, 0, 0, 0.87));
 	background-color: var(--rdt-color-bg, #fff);
 	font-family: var(--rdt-font-family, inherit);
@@ -15,6 +19,10 @@
 	color-scheme: var(--rdt-color-scheme, light);
 	/* Sort icon scales with the theme's icon size */
 	--rdt-sort-icon-size: calc(var(--rdt-icon-size, 18px) * 0.8);
+	/* Expander open/close animation length. Mirrors EXPAND_DURATION in
+	   constants.ts, which keeps the closing row mounted for exactly this long
+	   before unmounting it — keep the two in sync. */
+	--rdt-expand-duration: 220ms;
 }
 
 .rdt_tableDisabled {
@@ -26,6 +34,10 @@
 .rdt_wrapper {
 	position: relative;
 	width: 100%;
+	/* Track the scrolled content width (same reason as .rdt_table above) so
+	   tableWrapper custom styles paint fully and ResizeObservers on this element
+	   see content-width changes. */
+	min-width: fit-content;
 }
 
 .rdt_responsiveWrapper {
@@ -38,8 +50,8 @@
 	overflow-x: auto;
 	overflow-y: hidden;
 	min-height: 0;
-	overscroll-behavior-x: contain;
 	touch-action: pan-x pan-y;
+	-webkit-overflow-scrolling: touch;
 }
 
 .rdt_responsiveWrapperFixed {
@@ -47,7 +59,6 @@
 	overflow-y: auto;
 	-webkit-overflow-scrolling: touch;
 	min-height: 0;
-	overscroll-behavior-x: contain;
 	touch-action: pan-x pan-y;
 }
 
@@ -132,12 +143,39 @@
 }
 
 /*
+ * Inside a fixed-header scroll container the browser can skip layout and paint
+ * for rows outside the viewport. contain-intrinsic-size keeps the scrollbar
+ * stable by estimating skipped rows at the theme row height.
+ */
+.rdt_responsiveWrapperFixed .rdt_row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto var(--rdt-row-height, 48px);
+}
+
+.rdt_responsiveWrapperFixed .rdt_rowDense {
+	contain-intrinsic-size: auto 32px;
+}
+
+/*
+ * animateRows and content-visibility are incompatible: the browser estimates
+ * off-screen row positions, so getBoundingClientRect during a FLIP reports the
+ * estimate rather than the real position and the animation is wrong or skipped.
+ * With animation on, opt rows back into normal layout (the row count that
+ * animates is bounded by the visible page, so the perf cost is limited).
+ */
+.rdt_responsiveWrapperAnimated .rdt_row {
+	content-visibility: visible;
+	contain-intrinsic-size: auto;
+}
+
+/*
  * Row separators are drawn on each cell rather than on the row container.
  * This keeps the divider line visible on sticky (pinned) cells even when
  * the table scrolls horizontally — the border travels with the cell, not
  * with the scrolling content.
  */
-.rdt_row:not(:last-of-type) .rdt_cellBase {
+.rdt_row:not(:last-of-type) .rdt_cellBase,
+.rdt_row:not(:last-of-type) .rdt_rightPinSpacer {
 	border-bottom: 1px solid var(--rdt-color-divider, rgba(0, 0, 0, 0.12));
 }
 
@@ -157,7 +195,7 @@
 
 .rdt_rowHighlight:hover {
 	color: var(--rdt-color-highlight-text, rgba(0, 0, 0, 0.87));
-	background-color: var(--rdt-color-highlight, #eee);
+	background-color: var(--rdt-color-highlight, #eee) !important;
 	outline: 1px solid var(--rdt-color-bg, #fff);
 	transition-duration: 0.15s;
 	transition-property: background-color;
@@ -183,10 +221,15 @@
 .rdt_headSeparator .rdt_cellBaseHead:not(.rdt_groupCell) + .rdt_cellBaseHead:not(.rdt_groupCell)::before,
 .rdt_headSeparatorFull .rdt_cellBaseHead:not(.rdt_groupCell) + .rdt_cellBaseHead:not(.rdt_groupCell)::before,
 .rdt_colSeparator .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_cellBase:not(.rdt_cellBaseHead)::before,
-.rdt_colSeparatorFull .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_cellBase:not(.rdt_cellBaseHead)::before {
+.rdt_colSeparatorFull .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_cellBase:not(.rdt_cellBaseHead)::before,
+.rdt_headSeparator .rdt_cellBaseHead:not(.rdt_groupCell) + .rdt_rightPinSpacer::before,
+.rdt_headSeparatorFull .rdt_cellBaseHead:not(.rdt_groupCell) + .rdt_rightPinSpacer::before,
+.rdt_colSeparator .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_rightPinSpacer::before,
+.rdt_colSeparatorFull .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_rightPinSpacer::before {
 	content: '';
 	position: absolute;
-	left: 0;
+	/* inline-start = the boundary shared with the previous DOM sibling in both LTR and RTL */
+	inset-inline-start: 0;
 	top: var(--_sep-top, 20%);
 	height: var(--_sep-h, 60%);
 	width: 1px;
@@ -196,9 +239,19 @@
 
 /* Full-height variants override the inset defaults */
 .rdt_headSeparatorFull .rdt_cellBaseHead:not(.rdt_groupCell) + .rdt_cellBaseHead:not(.rdt_groupCell)::before,
-.rdt_colSeparatorFull .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_cellBase:not(.rdt_cellBaseHead)::before {
+.rdt_colSeparatorFull .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_cellBase:not(.rdt_cellBaseHead)::before,
+.rdt_headSeparatorFull .rdt_cellBaseHead:not(.rdt_groupCell) + .rdt_rightPinSpacer::before,
+.rdt_colSeparatorFull .rdt_cellBase:not(.rdt_cellBaseHead) + .rdt_rightPinSpacer::before {
 	--_sep-top: 0;
 	--_sep-h: 100%;
+}
+
+/* The spacer sits between the last unpinned column and the right pin band and
+   clips its own separator, so the line closing the unpinned columns only shows
+   when slack space actually opens the gap (zero-width spacer = no line). */
+.rdt_rightPinSpacer {
+	position: relative;
+	overflow: hidden;
 }
 
 
@@ -253,6 +306,13 @@
 	background: var(--rdt-color-primary, #1976d2);
 	border-color: var(--rdt-color-primary, #1976d2);
 	opacity: 1;
+}
+
+/* The real input is a transparent overlay, so keyboard focus has to be drawn on the
+   box the user actually sees. :focus-visible keeps the ring off mouse clicks. */
+.rdt_Checkbox:has(> input[type='checkbox']:focus-visible)::before {
+	outline: 2px solid var(--rdt-color-primary, #1976d2);
+	outline-offset: 2px;
 }
 
 .rdt_Checkbox::after {
@@ -323,7 +383,6 @@
 	cursor: pointer;
 }
 
-
 .rdt_columnSortableEnabled:not(.rdt_columnSortableActive):hover,
 .rdt_columnSortableEnabled:not(.rdt_columnSortableActive):focus {
 	opacity: 0.7;
@@ -345,7 +404,7 @@
 	position: relative;
 	display: inline-flex;
 	align-items: center;
-	margin-left: 4px;
+	margin-inline-start: 4px;
 	flex-shrink: 0;
 }
 
@@ -363,6 +422,7 @@
 	height: 22px;
 	padding: 0;
 	transition: background-color 0.2s, color 0.2s;
+	touch-action: manipulation;
 }
 
 .rdt_filterIcon:hover,
@@ -378,7 +438,7 @@
 .rdt_filterDot {
 	position: absolute;
 	top: 3px;
-	right: 3px;
+	inset-inline-end: 3px;
 	width: 5px;
 	height: 5px;
 	border-radius: 50%;
@@ -387,17 +447,39 @@
 }
 
 /* Panel — position is set inline (fixed, coords from getBoundingClientRect) */
-.rdt_filterPanel {
+/* Shared chrome for the floating surfaces (column filter panel, context menu). Both
+   mount hidden, get positioned in a layout effect, then have rdt_popupVisible added
+   to reveal them — keep the two in step by styling them here rather than apart. */
+.rdt_popup {
 	z-index: 9999;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	box-sizing: border-box;
 	background: var(--rdt-color-bg, #fff);
 	border: 1px solid var(--rdt-color-divider, rgba(0, 0, 0, 0.18));
 	border-radius: var(--rdt-border-radius, 6px);
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+	box-shadow: var(--rdt-shadow-popup, 0 4px 16px rgba(0, 0, 0, 0.14));
+}
+
+.rdt_popupVisible {
+	animation: rdt_popupIn 140ms ease-out;
+}
+
+/* Fade only, no travel: both popups flip above their anchor when there is no room
+   below, so a fixed direction would animate the wrong way in the flipped case. */
+@keyframes rdt_popupIn {
+	from {
+		opacity: 0;
+	}
+}
+
+.rdt_filterPanel {
+	gap: 6px;
 	padding: 10px;
-	min-width: 260px;
+	min-width: min(260px, calc(100vw - 16px));
+	max-width: calc(100vw - 16px);
+	max-height: calc(100vh - 16px);
+	overflow: auto;
 }
 
 /* A single condition row: [select] [input] ([and] [input]) [remove] */
@@ -438,6 +520,68 @@
 .rdt_filterInput:focus {
 	outline: 2px solid var(--rdt-color-primary, #1976d2);
 	outline-offset: -1px;
+}
+
+/* Set (checklist) filter */
+.rdt_filterSet {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.rdt_filterSetSearch {
+	flex: none;
+}
+
+.rdt_filterSetList {
+	display: flex;
+	flex-direction: column;
+	max-height: 220px;
+	overflow-y: auto;
+	border: 1px solid var(--rdt-color-divider, rgba(0, 0, 0, 0.12));
+	border-radius: calc(var(--rdt-border-radius, 6px) * 0.6);
+	padding: 2px;
+}
+
+.rdt_filterSetItem {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--rdt-color-text-primary, rgba(0, 0, 0, 0.87));
+	padding: 3px 5px;
+	border-radius: 3px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.rdt_filterSetItem:hover,
+.rdt_filterSetItem:focus-within {
+	background-color: var(--rdt-color-btn-hover, rgba(0, 0, 0, 0.08));
+}
+
+.rdt_filterSetItem > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.rdt_filterSetItem > .rdt_Checkbox {
+	--rdt-checkbox-size: 14px;
+	cursor: inherit;
+}
+
+.rdt_filterSetSelectAll {
+	border-bottom: 1px solid var(--rdt-color-divider, rgba(0, 0, 0, 0.12));
+	margin-bottom: 2px;
+	padding-bottom: 4px;
+}
+
+.rdt_filterSetEmpty {
+	font-size: 12px;
+	color: var(--rdt-color-text-secondary, rgba(0, 0, 0, 0.54));
+	padding: 8px 4px;
+	text-align: center;
 }
 
 .rdt_filterBetweenSep {
@@ -538,6 +682,139 @@
 	}
 }
 
+/* ─── Context menu ──────────────────────────────────────────────────────────── */
+.rdt_kebabIcon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	position: relative;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--rdt-color-btn, rgba(0, 0, 0, 0.54));
+	border-radius: 50%;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	margin-inline-start: 4px;
+	transition: background-color 0.2s, color 0.2s;
+	touch-action: manipulation;
+}
+
+.rdt_kebabIcon:hover,
+.rdt_kebabIcon:focus {
+	background-color: var(--rdt-color-btn-hover, rgba(0, 0, 0, 0.08));
+	outline: none;
+}
+
+/* Menu — position is set inline (fixed, coords clamped/flipped after measure) */
+.rdt_contextMenu {
+	min-width: 180px;
+	max-width: calc(100vw - 24px);
+	padding: 4px;
+}
+
+.rdt_contextMenuItem {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	background: none;
+	border: none;
+	border-radius: calc(var(--rdt-border-radius, 6px) * 0.6);
+	padding: 6px 10px;
+	font-size: 13px;
+	text-align: start;
+	cursor: pointer;
+	color: var(--rdt-color-text-primary, rgba(0, 0, 0, 0.87));
+}
+
+.rdt_contextMenuItem:hover:not(:disabled) {
+	background-color: var(--rdt-color-btn-hover, rgba(0, 0, 0, 0.08));
+}
+
+/* Keyboard focus needs to outrank hover: arrowing down while the pointer rests on
+   another item would otherwise highlight both identically, hiding which is active.
+   Plain :focus, not :focus-visible: focus here is always moved by script (menu open,
+   then arrow keys), which does not reliably match :focus-visible. */
+.rdt_contextMenuItem:focus {
+	background-color: var(--rdt-color-btn-hover, rgba(0, 0, 0, 0.08));
+	outline: 2px solid var(--rdt-color-primary, #1976d2);
+	outline-offset: -2px;
+}
+
+.rdt_contextMenuItem:disabled {
+	color: var(--rdt-color-btn-disabled, rgba(0, 0, 0, 0.34));
+	cursor: default;
+}
+
+/* A fixed slot so labels line up whether or not an item has an icon: built-ins have
+   one and custom actions may not, and they share a menu. */
+.rdt_contextMenuItemIcon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 14px;
+}
+
+/* Icons are currentColor, so a disabled item already dims them. Mute only the enabled
+   ones: stacking this opacity on the disabled color all but erased the glyph. */
+.rdt_contextMenuItem:not(:disabled) .rdt_contextMenuItemIcon {
+	opacity: 0.7;
+}
+
+.rdt_contextMenuSeparator {
+	height: 1px;
+	margin: 4px 6px;
+	background: var(--rdt-color-divider, rgba(0, 0, 0, 0.12));
+}
+
+/* Row kebab — sticky slot at the row's inline end. It paints an opaque square
+   (inheriting the row background: baseline, hover, stripe, selected) that masks
+   horizontally-scrolled cell content behind the circular button's transparent
+   corners. A negative inline margin pulls it out of layout flow so it never
+   shifts the column widths — same net effect as a zero-width slot. */
+.rdt_rowKebabCell {
+	position: sticky;
+	inset-inline-end: 8px;
+	align-self: center;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	/* Wider than the 22px button so it paints a little padding around it and the
+	   button never sits flush against the table edge. */
+	width: 34px;
+	margin-inline-start: -34px;
+	overflow: visible;
+	z-index: 2;
+	background-color: inherit;
+}
+
+.rdt_rowKebabCell.rdt_rowKebabStart {
+	inset-inline-end: auto;
+	inset-inline-start: 8px;
+	margin-inline-start: 0;
+	margin-inline-end: -34px;
+	order: -1;
+}
+
+.rdt_rowKebab {
+	opacity: 0;
+}
+
+.rdt_row:hover .rdt_rowKebab,
+.rdt_row:focus-within .rdt_rowKebab {
+	opacity: 1;
+}
+
+@media (hover: none) {
+	.rdt_rowKebab {
+		opacity: 1;
+	}
+}
+
 /* Drag ghost — custom image shown while dragging a reorderable column */
 .rdt_dragGhost {
 	position: fixed;
@@ -627,6 +904,13 @@
 	padding-top: 0;
 	padding-bottom: 0;
 }
+
+/* Row divider border-bottom (see .rdt_row:not(:last-of-type) .rdt_cellBase above) would
+   otherwise stack with the box-shadow above, thickening the editing cell's bottom edge.
+   Needs equal specificity (two classes) to win over that compound selector. */
+.rdt_row:not(:last-of-type) .rdt_cellEditing {
+	border-bottom-color: transparent;
+}
 @supports (background-color: color-mix(in srgb, red 1%, white)) {
 	.rdt_cellEditing {
 		background-color: var(--rdt-color-cell-edit-bg, color-mix(in srgb, var(--rdt-color-primary, #1976d2) 8%, var(--rdt-color-bg, #fff)));
@@ -661,13 +945,13 @@
 
 /*
  * Native select arrow — rendered as a ::after pseudo-element on the editing
- * cell so we can use currentColor (inherits the theme's text colour) via
+ * cell so we can use currentColor (inherits the theme's text color) via
  * mask-image. The select element itself can't host ::after.
  */
 .rdt_cellEditing:has(.rdt_editSelect)::after {
 	content: '';
 	position: absolute;
-	right: var(--rdt-cell-padding-x, 16px);
+	inset-inline-end: var(--rdt-cell-padding-x, 16px);
 	top: 50%;
 	transform: translateY(-50%);
 	width: 12px;
@@ -681,13 +965,84 @@
 }
 
 .rdt_editSelect {
-	padding-right: calc(var(--rdt-cell-padding-x, 16px) + 24px);
+	padding-inline-end: calc(var(--rdt-cell-padding-x, 16px) + 24px);
 }
 
 /* Dense rows shrink the editor height to match */
 .rdt_rowDense .rdt_editInput,
 .rdt_rowDense .rdt_editSelect {
 	min-height: 32px;
+}
+
+/* ─── Editor: checkbox ─────────────────────────────────────────────────────── */
+.rdt_editCheckboxWrap {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	cursor: pointer;
+	user-select: none;
+}
+
+.rdt_editCheckbox {
+	appearance: auto;
+	cursor: pointer;
+	margin: 0;
+	width: 16px;
+	height: 16px;
+}
+
+.rdt_editCheckboxWrap:focus-visible {
+	outline: 2px solid var(--rdt-color-primary);
+	outline-offset: -2px;
+	border-radius: var(--rdt-border-radius, 4px);
+}
+
+/* ─── Editor: custom ───────────────────────────────────────────────────────── */
+.rdt_editCustomWrap {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	height: 100%;
+	padding: 0 var(--rdt-cell-padding-x, 16px);
+}
+
+/* ─── Editor: validation error ─────────────────────────────────────────────── */
+.rdt_cellEditError {
+	box-shadow: inset 0 0 0 2px var(--rdt-color-cell-edit-error, #dc2626);
+}
+
+.rdt_editErrorTip {
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	margin-bottom: 2px;
+	padding: 2px 6px;
+	font-size: 11px;
+	line-height: 1.4;
+	color: #fff;
+	background: var(--rdt-color-cell-edit-error, #dc2626);
+	border-radius: var(--rdt-border-radius, 4px);
+	white-space: nowrap;
+	pointer-events: none;
+	z-index: 5;
+}
+
+.rdt_TableCell.rdt_cellEditError {
+	position: relative;
+}
+
+/* ─── Cell navigation: focus outline ───────────────────────────────────────── */
+/* Focus ring for keyboard cell navigation (`cellNavigation`). :focus-within also
+   covers cells whose real focus target is an inner widget (row checkbox, expander
+   button). Excludes .rdt_cellEditing: that state already draws its own inset
+   box-shadow ring, and stacking this outline on top of it visibly thickens
+   whichever edge the two rings don't land on the same physical pixel. */
+.rdt_table[role='grid'] [data-nav-row]:focus-within:not(.rdt_cellEditing) {
+	outline: 2px solid var(--rdt-color-primary, #1976d2);
+	outline-offset: -2px;
+	z-index: 2;
 }
 
 
@@ -705,46 +1060,85 @@
 	background-color: inherit;
 }
 
+/* The pin-band edge is a crisp 1px line (no blur), so it reads as a boundary
+   without washing out neighboring header/column separators. Kept as box-shadow
+   rather than border so it adds no width to the cell box. No clip-path: it
+   would also clip hit-testing on the resize handle straddling the cell edge. */
 .rdt_pinLeftLast {
-	box-shadow: 2px 0 4px -1px var(--rdt-color-pin-shadow, rgba(0, 0, 0, 0.12));
-	clip-path: inset(0 -8px 0 0);
+	box-shadow: 1px 0 0 var(--rdt-color-pin-border, var(--rdt-color-divider, rgba(0, 0, 0, 0.12)));
 }
 
 .rdt_pinRightFirst {
-	box-shadow: -2px 0 4px -1px var(--rdt-color-pin-shadow, rgba(0, 0, 0, 0.12));
-	clip-path: inset(0 0 0 -8px);
+	box-shadow: -1px 0 0 var(--rdt-color-pin-border, var(--rdt-color-divider, rgba(0, 0, 0, 0.12)));
+}
+
+/* The pin boundary draws its own line — drop the column/header separator that
+   would double up at the same boundary. */
+.rdt_pinLeftLast + .rdt_cellBase,
+.rdt_pinRightFirst {
+	--rdt-col-sep-color: transparent;
+}
+
+/* box-shadow has no logical variant — mirror the pin-band edge line by hand
+   under RTL, where inline-start pins sit on the physical right. */
+.rdt_pinLeftLast:dir(rtl) {
+	box-shadow: -1px 0 0 var(--rdt-color-pin-border, var(--rdt-color-divider, rgba(0, 0, 0, 0.12)));
+}
+
+.rdt_pinRightFirst:dir(rtl) {
+	box-shadow: 1px 0 0 var(--rdt-color-pin-border, var(--rdt-color-divider, rgba(0, 0, 0, 0.12)));
 }
 
 /* ─── Column resize handle ──────────────────────────────────────────────────── */
 /*
  * The handle straddles the cell boundary so its hit area is centered on the
- * separator line rather than offset to one side. width/2 = 3px → right: -3px
- * centers a 6px-wide handle on the column edge, matching the position of
+ * separator line rather than offset to one side. width/2 = 5px → inset-inline-end: -5px
+ * centers a 10px-wide handle on the column's end edge, matching the position of
  * .rdt_headSeparator/.rdt_colSeparator pseudo-elements drawn at the boundary.
+ * inset-inline-end resolves to the left edge under RTL so the handle mirrors correctly.
+ * z-index lifts the outer half above the following header cell, which is
+ * position:relative and later in the DOM — without it that cell paints over the
+ * handle and hit-tests steal half the grab area.
  */
 .rdt_resizeHandle {
 	position: absolute;
-	right: -3px;
+	inset-inline-end: -5px;
 	top: 0;
 	height: 100%;
-	width: 6px;
+	width: 10px;
 	cursor: col-resize;
 	user-select: none;
+	touch-action: none;
+	z-index: 1;
+}
+
+/* The last column's handle would straddle the scroll container's edge, which
+   clips its outer half and leaves a sliver of a hit target — keep it fully inside. */
+.rdt_cellBaseHead:last-child .rdt_resizeHandle {
+	inset-inline-end: 0;
 	z-index: 2;
 }
 
-/* Reveal only when hovering the handle itself or actively dragging */
-.rdt_resizeHandle:hover,
-.rdt_resizeHandle:active {
-	background-image: linear-gradient(
-		to right,
-		transparent 0,
-		transparent 2px,
-		var(--rdt-color-primary, #1976d2) 2px,
-		var(--rdt-color-primary, #1976d2) 4px,
-		transparent 4px,
-		transparent 6px
-	);
+/* Hover/drag indicator: a 3px bar centered on the 1px separator line (drawn at
+   the next cell's inline-start) instead of sitting a pixel inside the current
+   column. inset-inline-end keeps it on the boundary side under RTL, which a
+   physical linear-gradient could not do. */
+.rdt_resizeHandle::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	height: 100%;
+	width: 3px;
+	inset-inline-end: 3px;
+}
+
+.rdt_cellBaseHead:last-child .rdt_resizeHandle::after {
+	inset-inline-end: 0;
+}
+
+.rdt_resizeHandle:hover::after,
+.rdt_resizeHandle:active::after {
+	background-color: var(--rdt-color-primary, #1976d2);
 }
 
 /* ─── Column group header — CSS Grid layout ─────────────────────────────────
@@ -817,7 +1211,7 @@
 .rdt_groupCell + .rdt_groupCell::before {
 	content: '';
 	position: absolute;
-	left: 0;
+	inset-inline-start: 0;
 	top: 20%;
 	height: 60%;
 	width: 1px;
@@ -853,6 +1247,23 @@
 	transform: rotate(180deg);
 }
 
+/* Multi-column sort priority badge */
+.rdt_sortPriority {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 14px;
+	height: 14px;
+	margin: 0 2px;
+	padding: 0 3px;
+	border-radius: 7px;
+	font-size: 10px;
+	line-height: 1;
+	font-weight: 600;
+	color: var(--rdt-color-bg, #fff);
+	background-color: var(--rdt-color-text-secondary, rgba(0, 0, 0, 0.54));
+}
+
 /* ─── Expander ──────────────────────────────────────────────────────────────── */
 .rdt_expanderRow {
 	width: 100%;
@@ -864,6 +1275,8 @@
 .rdt_expanderButton {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
+	margin: auto;
 	user-select: none;
 	white-space: nowrap;
 	border: none;
@@ -872,9 +1285,7 @@
 	fill: var(--rdt-color-btn, rgba(0, 0, 0, 0.54));
 	border-radius: var(--rdt-border-radius, 4px);
 	transition: background-color 0.15s;
-	height: 100%;
-	width: 100%;
-	padding: 0;
+	padding: 4px;
 }
 
 .rdt_expanderButton svg {
@@ -916,6 +1327,19 @@
 	min-height: 56px;
 	padding-left: 16px;
 	padding-right: 8px;
+	gap: 4px;
+}
+
+@media (max-width: 599px) {
+	.rdt_header {
+		font-size: 18px;
+		padding-left: 12px;
+		padding-right: 6px;
+	}
+
+	.rdt_headerActions {
+		flex: 0 0 auto;
+	}
 }
 
 .rdt_headerTitle {
@@ -1028,6 +1452,47 @@
 	pointer-events: none;
 }
 
+/* Initial load with a custom progressComponent: no rows behind it to fill height,
+ * so the overlay is in-flow and reserves its own vertical space. */
+.rdt_bodyOverlayEmpty {
+	position: static;
+	min-height: 96px;
+	padding: 24px 0;
+}
+
+/* ─── Footer ─────────────────────────────────────────────────────────────────
+ * Lives inside .rdt_table so it shares the same flex layout as body rows —
+ * column widths align automatically with the rest of the table.
+ * The row gets a top border to visually separate the totals from the data.
+ */
+.rdt_footer {
+	display: flex;
+	flex-direction: column;
+	background-color: var(--rdt-color-footer-bg, var(--rdt-color-bg, #fff));
+}
+
+.rdt_footerRow {
+	display: flex;
+	align-items: stretch;
+	width: 100%;
+	box-sizing: border-box;
+	min-height: var(--rdt-row-height, 48px);
+	font-size: var(--rdt-font-size, 13px);
+	font-weight: 600;
+	color: var(--rdt-color-text-primary, rgba(0, 0, 0, 0.87));
+	border-top: 1px solid var(--rdt-color-divider, rgba(0, 0, 0, 0.12));
+}
+
+.rdt_footerCell {
+	background-color: inherit;
+}
+
+.rdt_footerSystemCell {
+	flex: 0 0 var(--rdt-system-col-width, 40px);
+	min-width: 0;
+	max-width: var(--rdt-system-col-width, 40px);
+}
+
 /* ─── Pagination ────────────────────────────────────────────────────────────── */
 .rdt_pagination {
 	display: flex;
@@ -1043,7 +1508,6 @@
 	color: var(--rdt-color-text-secondary, rgba(0, 0, 0, 0.54));
 	background-color: var(--rdt-color-bg, #fff);
 	min-height: var(--rdt-row-height, 52px);
-	border-top: 1px solid var(--rdt-color-divider, rgba(0, 0, 0, 0.12));
 }
 
 .rdt_paginationButton {
@@ -1097,11 +1561,19 @@
 	white-space: nowrap;
 }
 
-@media (max-width: 599px) {
-	.rdt_paginationPageList {
-		width: 100%;
-		justify-content: space-around;
-	}
+/* Narrow mode is driven by the component measuring its own container width
+   (not a viewport media query, which disagrees with the container when the
+   table sits in a narrow pane on a wide window). The label and range are not
+   rendered at all in narrow mode, so no display:none rules are needed. */
+.rdt_paginationNarrow {
+	justify-content: center;
+	padding-left: 4px;
+	padding-right: 4px;
+}
+
+.rdt_paginationNarrow .rdt_paginationPageList {
+	width: 100%;
+	justify-content: space-around;
 }
 
 .rdt_paginationSpan {
@@ -1145,7 +1617,7 @@
 
 .rdt_selectWrapper svg {
 	top: 50%;
-	right: 2px;
+	inset-inline-end: 2px;
 	transform: translateY(-50%);
 	color: var(--rdt-color-text-secondary, rgba(0, 0, 0, 0.54));
 	position: absolute;
@@ -1163,8 +1635,8 @@
 	height: 100%;
 	max-width: 100%;
 	user-select: none;
-	padding-left: 8px;
-	padding-right: 22px;
+	padding-inline-start: 8px;
+	padding-inline-end: 22px;
 	box-sizing: border-box;
 	font-size: inherit;
 	font-family: inherit;
@@ -1172,7 +1644,6 @@
 	border: none;
 	background-color: transparent;
 	appearance: none;
-	direction: ltr;
 	flex-shrink: 0;
 	outline: none;
 }
@@ -1184,6 +1655,23 @@
 .rdt_selectControl option {
 	color: initial;
 	background-color: var(--rdt-color-bg, #fff);
+}
+
+/* ─── Mobile touch targets ───────────────────────────────────────────────────── */
+@media (max-width: 599px) {
+	.rdt_row {
+		min-height: max(var(--rdt-row-height, 48px), 48px);
+	}
+
+	.rdt_cellBase {
+		padding-left: var(--rdt-cell-padding-x-mobile, 12px);
+		padding-right: var(--rdt-cell-padding-x-mobile, 12px);
+	}
+
+	.rdt_paginationButton {
+		height: 44px;
+		width: 44px;
+	}
 }
 
 /* ─── Responsive column hiding ───────────────────────────────────────────────── */
@@ -1230,36 +1718,29 @@
 	animation-delay: calc(var(--rdt-row-index, 0) * 16ms);
 }
 
-/* Expander row — slide open from top with a clip + fade */
+/* Expander row — grid-row trick gives a true height animation without JS measurement */
+.rdt_expanderRowAnimated {
+	display: grid;
+	animation: rdt_expandIn var(--rdt-expand-duration, 220ms) cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+.rdt_expanderRowClosing {
+	animation: rdt_expandOut var(--rdt-expand-duration, 220ms) cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
 @keyframes rdt_expandIn {
-	from {
-		opacity: 0;
-		max-height: 0;
-		transform: translateY(-8px);
-	}
-	to {
-		opacity: 1;
-		/* JS sets --rdt-expander-height on the row when content height is known;
-		   falls back to a large value so the animation still works without JS. */
-		max-height: var(--rdt-expander-height, 4000px);
-		transform: translateY(0);
-	}
+	from { grid-template-rows: 0fr; opacity: 0; }
+	to   { grid-template-rows: 1fr; opacity: 1; }
 }
 
 @keyframes rdt_expandOut {
-	from {
-		opacity: 1;
-		max-height: var(--rdt-expander-height, 4000px);
-	}
-	to {
-		opacity: 0;
-		max-height: 0;
-	}
+	from { grid-template-rows: 1fr; opacity: 1; }
+	to   { grid-template-rows: 0fr; opacity: 0; }
 }
 
-.rdt_expanderRowAnimated {
-	animation: rdt_expandIn 0.25s cubic-bezier(0.2, 0, 0, 1) both;
+.rdt_expanderRowAnimated > .rdt_expanderRow {
 	overflow: hidden;
+	min-height: 0;
 }
 
 /* Sort indicator pulse — briefly highlights the sorted column */
@@ -1273,14 +1754,50 @@
 	animation: rdt_sortPulse 0.4s ease both;
 }
 
+/* ─── Keyboard focus ring ───────────────────────────────────────────────────── */
+/* Kept after the per-control `:focus { outline: none }` rules so it wins. The
+   background tint those rules apply is too faint to meet 3:1 non-text contrast. */
+.rdt_filterIcon:focus-visible,
+.rdt_kebabIcon:focus-visible,
+.rdt_expanderButton:focus-visible,
+.rdt_paginationButton:focus-visible {
+	outline: 2px solid var(--rdt-color-primary, #1976d2);
+	outline-offset: 2px;
+}
+
+/* The sort control fills its header cell edge to edge, so an outset ring is clipped
+   and an inset one crowds the label. Ring the header cell instead, like the grid ring. */
+.rdt_TableCol:has(> .rdt_columnSortableEnabled:focus-visible) {
+	outline: 2px solid var(--rdt-color-primary, #1976d2);
+	outline-offset: -2px;
+}
+
+/* In a cellNavigation grid the expander is the cell's own focus target, and the
+   cell ring already marks it. */
+.rdt_table[role='grid'] .rdt_expanderButton:focus-visible {
+	outline: none;
+}
+
 /* Respect user's motion preference */
 @media (prefers-reduced-motion: reduce) {
 	.rdt_animatedRow,
-	.rdt_expanderRowAnimated,
 	.rdt_sortActive {
 		animation: none !important;
 		transition: none !important;
 	}
-
-	/* Column reorder FLIP animations are skipped via JS matchMedia check */
+	.rdt_expanderRowAnimated,
+	.rdt_expanderRowClosing {
+		animation: none !important;
+		grid-template-rows: 1fr !important;
+		opacity: 1 !important;
+	}
+	/* Loading indicators: stop the infinite shimmer/spin loops. !important also
+	   overrides the spinner's inline animation (default progressComponent). */
+	.rdt_skeletonPulse,
+	.rdt_spinner {
+		animation: none !important;
+	}
+	.rdt_popupVisible {
+		animation: none !important;
+	}
 }

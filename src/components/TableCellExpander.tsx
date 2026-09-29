@@ -3,24 +3,32 @@ import '../DataTable.css';
 import { useStyles } from '../context/StylesContext';
 import { CellBase } from './Cell';
 import ExpanderButton from './ExpanderButton';
-import type { ExpandableIcon } from '../types';
+import { getRovingTabIndex } from '../util';
+import type { ExpandableIcon, Localization } from '../types';
+import type { NavCellProps } from '../context/RowContext';
+
+type ExpandableRowsOptions = NonNullable<Localization['expandable']>;
 
 type CellExpanderProps<T> = {
 	disabled: boolean;
 	expanded: boolean;
 	expandableIcon: ExpandableIcon;
+	expandableRowsOptions?: ExpandableRowsOptions;
 	id: string | number;
 	row: T;
 	onToggled: (row: T) => void;
+	nav?: NavCellProps;
 };
 
 function CellExpander<T>({
 	row,
 	expanded = false,
 	expandableIcon,
+	expandableRowsOptions,
 	id,
 	onToggled,
 	disabled = false,
+	nav,
 }: CellExpanderProps<T>): JSX.Element {
 	const customStyles = useStyles();
 
@@ -30,14 +38,21 @@ function CellExpander<T>({
 			className="rdt_cellExpander"
 			$noPadding
 			style={customStyles.expanderCell?.style as React.CSSProperties}
+			role={nav ? 'gridcell' : 'cell'}
+			tabIndex={nav ? -1 : undefined}
+			data-nav-row={nav?.row}
+			data-nav-col={nav?.col}
+			data-nav-widget={nav ? 'true' : undefined}
 		>
 			<ExpanderButton
 				id={id}
 				row={row}
 				expanded={expanded}
 				expandableIcon={expandableIcon}
+				expandableRowsOptions={expandableRowsOptions}
 				disabled={disabled}
 				onToggled={onToggled}
+				tabIndex={getRovingTabIndex(!!nav, !!nav?.active)}
 			/>
 		</CellBase>
 	);

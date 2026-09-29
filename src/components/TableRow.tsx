@@ -7,9 +7,15 @@ import TableCellCheckbox from './TableCellCheckbox';
 import TableCellExpander from './TableCellExpander';
 import ExpanderRow from './ExpanderRow';
 import RightPinSpacer from './RightPinSpacer';
-import { prop, equalizeId, getConditionalStyle, isOdd } from '../util';
+import MenuIcon from '../icons/MenuIcon';
+import { prop, equalizeId, getConditionalStyle, getFirstRightPinnedId, getPrefixColCount, isEven } from '../util';
 import { STOP_PROP_TAG } from '../constants';
-import type { TableRow } from '../types';
+import useRowExpander from '../hooks/useRowExpander';
+import type { TableRow, TableColumn } from '../types';
+
+function isRowTarget(e: React.MouseEvent<HTMLDivElement>): boolean {
+	return (e.target as HTMLDivElement).getAttribute('data-tag') === STOP_PROP_TAG;
+}
 
 interface TableRowProps<T> {
 	'data-row-id': string | number;
@@ -42,50 +48,49 @@ function Row<T>({
 		columns,
 		conditionalRowStyles,
 		dense,
-		expandableIcon,
-		expandableRows,
-		expandableRowsComponent,
-		expandableRowsComponentProps,
-		expandableRowsHideExpander,
-		expandOnRowClicked,
-		expandOnRowDoubleClicked,
-		expandableInheritConditionalStyles,
+		expansion,
 		highlightOnHover,
 		keyField,
-		onRowClicked,
-		onRowDoubleClicked,
-		onRowMiddleClicked,
-		onRowMouseEnter,
-		onRowMouseLeave,
-		onRowExpandToggled,
-		onSelectedRow,
+		rowEvents,
+		selection,
 		pointerOnHover,
-		selectableRowDisabled,
-		selectableRows,
-		selectableRowsComponent,
-		selectableRowsComponentProps,
-		selectableRowsHighlight,
-		selectableRowsSingle,
 		striped,
+		cellNavigation,
+		activeCell,
+		animateRows,
+		rowMenu,
 	} = useRowContext<T>();
 
-	const [expanded, setExpanded] = React.useState(defaultExpanded);
+	const { expanded, expanderMounted, isClosing, openExpander, closeExpander } = useRowExpander(
+		defaultExpanded,
+		animateRows,
+	);
 
-	React.useEffect(() => {
-		setExpanded(defaultExpanded);
-	}, [defaultExpanded]);
+	// Locals mirror the slices so the callback dep arrays below stay scalar.
+	const selectableRows = !!selection;
+	const expandableRows = !!expansion;
+	const expandOnRowClicked = !!expansion?.expandOnRowClicked;
+	const expandOnRowDoubleClicked = !!expansion?.expandOnRowDoubleClicked;
+	const expandableRowsHideExpander = !!expansion?.hideExpander;
+	const onRowExpandToggled = expansion?.onToggled;
 
 	const handleExpanded = React.useCallback(() => {
-		setExpanded(!expanded);
-		onRowExpandToggled(!expanded, row);
-	}, [expanded, onRowExpandToggled, row]);
+		const next = !expanded;
+		onRowExpandToggled?.(next, row);
+		if (next) {
+			openExpander();
+		} else {
+			closeExpander();
+		}
+	}, [expanded, onRowExpandToggled, row, openExpander, closeExpander]);
+
+	const { onRowClicked, onRowDoubleClicked, onRowMiddleClicked, onRowMouseEnter, onRowMouseLeave } = rowEvents;
 
 	const showPointer = pointerOnHover || (expandableRows && (expandOnRowClicked || expandOnRowDoubleClicked));
 
 	const handleRowClick = React.useCallback(
 		(e: React.MouseEvent<HTMLDivElement>) => {
-			const target = e.target as HTMLDivElement;
-			if (target.getAttribute('data-tag') === STOP_PROP_TAG) {
+			if (isRowTarget(e)) {
 				onRowClicked(row, e);
 				if (!defaultExpanderDisabled && expandableRows && expandOnRowClicked) {
 					handleExpanded();
@@ -97,6 +102,11 @@ function Row<T>({
 
 	const handleKeyDown = React.useCallback(
 		(e: React.KeyboardEvent<HTMLDivElement>) => {
+			// Only act on keys pressed while the row itself is focused — with cellNavigation
+			// (or an open editor) key events bubble up from focused descendants.
+			if (e.target !== e.currentTarget) {
+				return;
+			}
 			if (e.key === 'Enter') {
 				if (!defaultExpanderDisabled && expandableRows && expandOnRowClicked) {
 					handleExpanded();
@@ -109,8 +119,7 @@ function Row<T>({
 
 	const handleRowDoubleClick = React.useCallback(
 		(e: React.MouseEvent<HTMLDivElement>) => {
-			const target = e.target as HTMLDivElement;
-			if (target.getAttribute('data-tag') === STOP_PROP_TAG) {
+			if (isRowTarget(e)) {
 				onRowDoubleClicked(row, e);
 				if (!defaultExpanderDisabled && expandableRows && expandOnRowDoubleClicked) {
 					handleExpanded();
@@ -122,12 +131,17 @@ function Row<T>({
 
 	const handleRowAuxClick = React.useCallback(
 		(e: React.MouseEvent<HTMLDivElement>) => {
-			const target = e.target as HTMLDivElement;
-			if (target.getAttribute('data-tag') === STOP_PROP_TAG) {
+			if (isRowTarget(e)) {
 				onRowMiddleClicked(row, e);
 			}
 		},
 		[onRowMiddleClicked, row],
+	);
+
+	const onRowContextMenu = rowMenu?.onContextMenu;
+	const handleRowContextMenu = React.useCallback(
+		(e: React.MouseEvent<HTMLDivElement>) => onRowContextMenu?.(row, rowIndex, e),
+		[onRowContextMenu, row, rowIndex],
 	);
 
 	const handleRowMouseEnter = React.useCallback(
@@ -142,24 +156,32 @@ function Row<T>({
 
 	const rowKeyField = prop(row as TableRow, keyField) ?? rowIndex;
 
-	// ID of the first (leftmost) right-pinned column — a spacer is injected just
-	// before it so the non-pinned columns fill the available space between the pins.
-	const firstRightPinnedId = React.useMemo(() => {
-		for (const col of columns) {
-			if (!col.omit && col.pinned === 'right') return col.id;
+	// Cell navigation: selection/expander cells occupy the first nav columns, then each
+	// non-omitted data column gets the next index.
+	const navPrefixCount = getPrefixColCount(selectableRows, expandableRows, expandableRowsHideExpander);
+	const columnIndexMap = React.useMemo(() => {
+		const map = new Map<TableColumn<T>, number>();
+		let i = 0;
+		for (const c of columns) {
+			if (!c.omit) {
+				map.set(c, i++);
+			}
 		}
-		return null;
+		return map;
 	}, [columns]);
+	const navRowActive = cellNavigation && activeCell?.row === rowIndex;
+
+	const firstRightPinnedId = React.useMemo(() => getFirstRightPinnedId(columns), [columns]);
 	const { conditionalStyle, classNames } = React.useMemo(
 		() => getConditionalStyle(row, conditionalRowStyles, ['rdt_TableRow']),
 		[row, conditionalRowStyles],
 	);
-	const highlightSelected = selectableRowsHighlight && selected;
-	const inheritStyles = expandableInheritConditionalStyles ? conditionalStyle : {};
-	const isStriped = striped && isOdd(rowIndex);
+	const highlightSelected = !!selection?.highlight && selected;
+	const inheritStyles = expansion?.inheritConditionalStyles ? conditionalStyle : {};
+	const isStriped = striped && isEven(rowIndex);
 
-	const { animateRows } = useRowContext<T>();
 	const shouldAnimate = animateRows && isNew;
+
 	const className = [
 		classNames,
 		'rdt_row',
@@ -190,39 +212,47 @@ function Row<T>({
 				id={`row-${id}`}
 				role="row"
 				aria-selected={selectableRows ? selected : undefined}
-				tabIndex={!defaultExpanderDisabled && showPointer ? 0 : -1}
+				tabIndex={!cellNavigation && !defaultExpanderDisabled && showPointer ? 0 : -1}
 				className={className}
 				style={style}
 				onClick={handleRowClick}
 				onKeyDown={handleKeyDown}
 				onDoubleClick={handleRowDoubleClick}
 				onAuxClick={handleRowAuxClick}
+				onContextMenu={rowMenu?.rightClick ? handleRowContextMenu : undefined}
 				onMouseEnter={handleRowMouseEnter}
 				onMouseLeave={handleRowMouseLeave}
 			>
-				{selectableRows && (
+				{selection && (
 					<TableCellCheckbox
 						name={`Select row ${rowKeyField}`}
 						keyField={keyField}
 						row={row}
 						rowCount={rowCount}
 						selected={selected}
-						selectableRowsComponent={selectableRowsComponent}
-						selectableRowsComponentProps={selectableRowsComponentProps}
-						selectableRowDisabled={selectableRowDisabled}
-						selectableRowsSingle={selectableRowsSingle}
-						onSelectedRow={onSelectedRow}
+						selection={selection}
+						nav={cellNavigation ? { row: rowIndex, col: 0, active: navRowActive && activeCell?.col === 0 } : undefined}
 					/>
 				)}
 
-				{expandableRows && !expandableRowsHideExpander && (
+				{expansion && !expansion.hideExpander && (
 					<TableCellExpander
 						id={rowKeyField as string}
-						expandableIcon={expandableIcon}
+						expandableIcon={expansion.icon}
+						expandableRowsOptions={expansion.localization}
 						expanded={expanded}
 						row={row}
 						onToggled={handleExpanded}
 						disabled={defaultExpanderDisabled}
+						nav={
+							cellNavigation
+								? {
+										row: rowIndex,
+										col: selectableRows ? 1 : 0,
+										active: navRowActive && activeCell?.col === (selectableRows ? 1 : 0),
+									}
+								: undefined
+						}
 					/>
 				)}
 
@@ -240,21 +270,41 @@ function Row<T>({
 								column={column}
 								row={row}
 								rowIndex={rowIndex}
+								navCol={navPrefixCount + (columnIndexMap.get(column) ?? 0)}
 								isDragging={equalizeId(draggingColumnId, column.id)}
 							/>
 						</React.Fragment>
 					);
 				})}
+
+				{rowMenu?.menuButton && (
+					<div className={`rdt_rowKebabCell${rowMenu.menuButtonPosition === 'start' ? ' rdt_rowKebabStart' : ''}`}>
+						<button
+							type="button"
+							className="rdt_kebabIcon rdt_rowKebab"
+							aria-label={rowMenu.ariaLabel}
+							aria-haspopup="menu"
+							onClick={e => {
+								e.stopPropagation();
+								rowMenu.onMenuButtonClick(row, rowIndex, e);
+							}}
+						>
+							<MenuIcon />
+						</button>
+					</div>
+				)}
 			</div>
 
-			{expandableRows && expanded && expandableRowsComponent && (
+			{expansion && expanderMounted && expansion.component && (
 				<ExpanderRow
 					key={`expander-${rowKeyField}`}
 					data={row}
 					extendedRowStyle={inheritStyles}
 					extendedClassNames={classNames}
-					ExpanderComponent={expandableRowsComponent}
-					expanderComponentProps={expandableRowsComponentProps ?? {}}
+					ExpanderComponent={expansion.component}
+					expanderComponentProps={expansion.componentProps ?? {}}
+					animate={animateRows}
+					closing={isClosing}
 				/>
 			)}
 		</>
@@ -262,15 +312,33 @@ function Row<T>({
 }
 
 function areRowPropsEqual<T>(prevProps: TableRowProps<T>, nextProps: TableRowProps<T>): boolean {
-	if (prevProps.row !== nextProps.row) return false;
-	if (prevProps.selected !== nextProps.selected) return false;
-	if (prevProps.defaultExpanded !== nextProps.defaultExpanded) return false;
-	if (prevProps.defaultExpanderDisabled !== nextProps.defaultExpanderDisabled) return false;
-	if (prevProps.draggingColumnId !== nextProps.draggingColumnId) return false;
-	if (prevProps.rowCount !== nextProps.rowCount) return false;
-	if (prevProps.rowIndex !== nextProps.rowIndex) return false;
-	if (prevProps.isNew !== nextProps.isNew) return false;
-	if (prevProps.newRowIndex !== nextProps.newRowIndex) return false;
+	if (prevProps.row !== nextProps.row) {
+		return false;
+	}
+	if (prevProps.selected !== nextProps.selected) {
+		return false;
+	}
+	if (prevProps.defaultExpanded !== nextProps.defaultExpanded) {
+		return false;
+	}
+	if (prevProps.defaultExpanderDisabled !== nextProps.defaultExpanderDisabled) {
+		return false;
+	}
+	if (prevProps.draggingColumnId !== nextProps.draggingColumnId) {
+		return false;
+	}
+	if (prevProps.rowCount !== nextProps.rowCount) {
+		return false;
+	}
+	if (prevProps.rowIndex !== nextProps.rowIndex) {
+		return false;
+	}
+	if (prevProps.isNew !== nextProps.isNew) {
+		return false;
+	}
+	if (prevProps.newRowIndex !== nextProps.newRowIndex) {
+		return false;
+	}
 	return true;
 }
 

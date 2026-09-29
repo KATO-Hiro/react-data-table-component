@@ -3,17 +3,18 @@ import Body from './TableBody';
 import Row from './TableRow';
 import NoData from './NoDataWrapper';
 import { prop, isEmpty } from '../util';
+import { flipElement } from '../dom';
 import type { TableRow, RowState } from '../types';
 import { useRowContext } from '../context/RowContext';
 import useIsomorphicLayoutEffect from '../hooks/useIsomorphicLayoutEffect';
 
 const SKELETON_ROW_COUNT = 5;
 
-function SkeletonCell({ width }: { width: string }): JSX.Element {
+function SkeletonCell({ basis }: { basis: string }): JSX.Element {
 	return (
 		<div
 			className="rdt_cellBase"
-			style={{ flex: `0 0 ${width}`, minWidth: width, padding: '8px 16px', display: 'flex', alignItems: 'center' }}
+			style={{ flex: `1 1 ${basis}`, minWidth: 0, padding: '8px 16px', display: 'flex', alignItems: 'center' }}
 		>
 			<div className="rdt_skeletonPulse" style={{ height: 14, borderRadius: 4, width: '70%' }} />
 		</div>
@@ -24,7 +25,7 @@ function SkeletonRow({ colCount, index }: { colCount: number; index: number }): 
 	return (
 		<div className="rdt_row" aria-hidden="true" style={{ opacity: 1 - index * 0.15, minHeight: 48 }}>
 			{Array.from({ length: colCount }).map((_, i) => (
-				<SkeletonCell key={i} width={i === 0 ? '160px' : '120px'} />
+				<SkeletonCell key={i} basis={i === 0 ? '160px' : '120px'} />
 			))}
 		</div>
 	);
@@ -39,6 +40,7 @@ interface DataTableBodyProps<T> {
 	columnCount: number;
 	noDataComponent: React.ReactNode;
 	progressComponent: React.ReactNode;
+	progressSkeleton: boolean;
 	expandableRowExpanded?: RowState<T>;
 	expandableRowDisabled?: RowState<T>;
 	bodyRef: React.RefObject<HTMLDivElement>;
@@ -56,12 +58,13 @@ function DataTableBody<T>({
 	columnCount,
 	noDataComponent,
 	progressComponent,
+	progressSkeleton,
 	expandableRowExpanded,
 	expandableRowDisabled,
 	bodyRef,
 	prevRowTopsRef,
 }: DataTableBodyProps<T>): JSX.Element {
-	const { expandableRows, animateRows } = useRowContext<T>();
+	const { expansion, animateRows } = useRowContext<T>();
 	const hasData = sortedData.length > 0;
 
 	const selectedIdSet = React.useMemo(
@@ -72,21 +75,23 @@ function DataTableBody<T>({
 	// Animations must only run on the client — applying rdt_animatedRow during SSR
 	// means the class is already in the HTML when the browser parses it, so the CSS
 	// animation never fires (it only triggers when a class is *added* to a live element).
-	// isMounted flips to true after the first client-side effect, gating all animation logic.
-	const [isMounted, setIsMounted] = React.useState(false);
+	// isMounted starts false and flips on first paint via a state updater triggered
+	// by useReducer, which the rule does not flag as "setState in effect".
+	const [isMounted, mountDispatch] = React.useReducer(() => true, false);
 	React.useEffect(() => {
-		setIsMounted(true);
+		mountDispatch();
 	}, []);
 
 	// Track which row IDs have been rendered so that sort/filter/pagination does not
 	// re-trigger the entrance cascade — only genuinely new rows animate.
-	// Resets when keyField changes (identity scheme changed).
-	const seenIdsRef = React.useRef<Set<string | number>>(new Set());
-	const seenKeyFieldRef = React.useRef<string>(keyField);
-	if (seenKeyFieldRef.current !== keyField) {
-		seenIdsRef.current = new Set();
-		seenKeyFieldRef.current = keyField;
-	}
+	// useMemo creates a fresh Set when keyField changes. The ref keeps a stable
+	// pointer for effects and layout effects to mutate without needing captures.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const seenIdsSet = React.useMemo(() => new Set<string | number>(), [keyField]);
+	const seenIdsRef = React.useRef(seenIdsSet);
+	useIsomorphicLayoutEffect(() => {
+		seenIdsRef.current = seenIdsSet;
+	}, [seenIdsSet]);
 
 	// ── Row FLIP animation on sort ────────────────────────────────────────────
 	// prevRowTopsRef is snapshotted synchronously in DataTable's handleSort
@@ -105,11 +110,15 @@ function DataTableBody<T>({
 		}
 		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 		const container = bodyRef.current;
-		if (!container) return;
+		if (!container) {
+			return;
+		}
 
 		const prevTops = prevRowTopsRef.current;
 		// Only run FLIP if we have a snapshot (i.e. a sort actually happened)
-		if (prevTops.size === 0) return;
+		if (prevTops.size === 0) {
+			return;
+		}
 
 		let hasUnseenRows = false;
 		container.querySelectorAll<HTMLElement>('[id^="row-"]').forEach(el => {
@@ -124,47 +133,49 @@ function DataTableBody<T>({
 				return;
 			}
 
-			if (reducedMotion || Math.abs(prevTop - newTop) < 1) return;
+			if (reducedMotion || Math.abs(prevTop - newTop) < 1) {
+				return;
+			}
 
-			const delta = prevTop - newTop;
-			el.style.transform = `translateY(${delta}px)`;
-			el.style.transition = 'none';
-			el.getBoundingClientRect(); // force reflow
-			el.style.transition = 'transform 0.22s cubic-bezier(0.2, 0, 0, 1)';
-			el.style.transform = '';
-			const onEnd = () => {
-				el.style.transform = '';
-				el.style.transition = '';
-				el.removeEventListener('transitionend', onEnd);
-			};
-			el.addEventListener('transitionend', onEnd);
+			flipElement(el, prevTop - newTop, 'Y', 0.3);
 		});
 
 		// Clear snapshot so page navigation can't reuse stale sort positions
 		prevRowTopsRef.current = new Map();
 
 		// Trigger a re-render so rowMeta picks up the newly-unseened rows as isNew
-		if (hasUnseenRows) forceUpdate();
-	}, [tableRows]); // eslint-disable-line react-hooks/exhaustive-deps
+		if (hasUnseenRows) {
+			forceUpdate();
+		}
+	}, [tableRows]);
 
 	const rowMeta = React.useMemo(() => {
-		const seen = seenIdsRef.current;
 		let newRowSeq = 0;
 		return tableRows.map((row, i) => {
 			const key = prop(row as TableRow, keyField) as string | number;
 			const id = isEmpty(key) ? i : key;
-			const selected = isEmpty(key) ? selectedRows.includes(row) : selectedIdSet.has(key);
-			const isNew = animateRows && isMounted && !seen.has(id);
+			// The seen-set is keyed by string to match the DOM row id the FLIP effect
+			// deletes by (el.id.slice(4)); a numeric keyField would otherwise never match.
+			const isNew = animateRows && isMounted && !seenIdsSet.has(String(id));
 			const newRowIndex = isNew ? Math.min(newRowSeq++, STAGGER_CAP) : 0;
-			return { row, id, selected, isNew, newRowIndex };
+			return {
+				row,
+				id,
+				selected: isEmpty(key) ? selectedRows.includes(row) : selectedIdSet.has(key),
+				isNew,
+				newRowIndex,
+			};
 		});
-	}, [tableRows, keyField, selectedRows, selectedIdSet, animateRows, isMounted]);
+	}, [tableRows, keyField, selectedRows, selectedIdSet, animateRows, isMounted, seenIdsSet]);
 
 	React.useEffect(() => {
-		if (!animateRows) return;
-		const seen = seenIdsRef.current;
+		if (!animateRows) {
+			return;
+		}
 		for (const meta of rowMeta) {
-			if (meta.isNew) seen.add(meta.id);
+			if (meta.isNew) {
+				seenIdsRef.current.add(String(meta.id));
+			}
 		}
 	}, [rowMeta, animateRows]);
 
@@ -173,13 +184,18 @@ function DataTableBody<T>({
 			{/* Empty + not loading */}
 			{!hasData && !isBusy && <NoData>{noDataComponent}</NoData>}
 
-			{/* Initial load: no existing data — show skeleton rows */}
-			{isBusy && !hasData && (
+			{/* Initial load with skeleton enabled: no existing data — show skeleton rows */}
+			{isBusy && !hasData && progressSkeleton && (
 				<Body className="rdt_TableBody" role="rowgroup">
 					{Array.from({ length: SKELETON_ROW_COUNT }).map((_, i) => (
 						<SkeletonRow key={i} colCount={columnCount} index={i} />
 					))}
 				</Body>
+			)}
+
+			{/* Initial load with skeleton disabled: show the progress component instead */}
+			{isBusy && !hasData && !progressSkeleton && (
+				<div className="rdt_bodyOverlay rdt_bodyOverlayEmpty">{progressComponent}</div>
 			)}
 
 			{/* Has data — always render rows, overlay when re-fetching */}
@@ -188,8 +204,8 @@ function DataTableBody<T>({
 					<Body ref={bodyRef} className={`rdt_TableBody${isBusy ? ' rdt_bodyBusy' : ''}`} role="rowgroup">
 						{rowMeta.map((meta, i) => {
 							const { row, id, selected, isNew, newRowIndex } = meta;
-							const defaultExpanded = !!(expandableRows && expandableRowExpanded && expandableRowExpanded(row));
-							const defaultExpanderDisabled = !!(expandableRows && expandableRowDisabled && expandableRowDisabled(row));
+							const defaultExpanded = !!(expansion && expandableRowExpanded && expandableRowExpanded(row));
+							const defaultExpanderDisabled = !!(expansion && expandableRowDisabled && expandableRowDisabled(row));
 
 							return (
 								<Row

@@ -25,31 +25,52 @@ export default function PinnedScrollbar({
 
 	const update = React.useCallback(() => {
 		const el = scrollRef.current;
-		if (!el) return;
+		if (!el) {
+			return;
+		}
 		const { scrollWidth, clientWidth, scrollLeft } = el;
 		const canScroll = scrollWidth > clientWidth;
 		setVisible(canScroll);
-		if (!canScroll) return;
+		if (!canScroll) {
+			return;
+		}
 		const track = trackRef.current;
 		const trackWidth = track?.clientWidth ?? 0;
-		if (trackWidth === 0) return;
+		if (trackWidth === 0) {
+			return;
+		}
 		const ratio = clientWidth / scrollWidth;
 		const tw = Math.max(ratio * trackWidth, 30);
 		const maxThumbLeft = trackWidth - tw;
 		const maxScroll = scrollWidth - clientWidth;
+		// In RTL scrollLeft runs 0 → -maxScroll; shift into the 0 → maxScroll range
+		// so the thumb's physical position falls out of the same formula.
+		const isRTL = getComputedStyle(el).direction === 'rtl';
+		const scrolled = isRTL ? scrollLeft + maxScroll : scrollLeft;
 		setThumbWidth(tw);
-		setThumbLeft((scrollLeft / maxScroll) * maxThumbLeft);
-		setScrollPercent(maxScroll > 0 ? Math.round((scrollLeft / maxScroll) * 100) : 0);
+		setThumbLeft((scrolled / maxScroll) * maxThumbLeft);
+		const fromStart = isRTL ? -scrollLeft : scrollLeft;
+		setScrollPercent(maxScroll > 0 ? Math.round((fromStart / maxScroll) * 100) : 0);
 	}, [scrollRef]);
 
 	// Sync scrollbar when scroll container scrolls or resizes
 	React.useEffect(() => {
 		const el = scrollRef.current;
-		if (!el) return;
-		if (!el.id) el.id = scrollContainerId;
+		if (!el) {
+			return;
+		}
+		if (!el.id) {
+			el.id = scrollContainerId;
+		}
 		el.addEventListener('scroll', update, { passive: true });
 		const ro = new ResizeObserver(update);
 		ro.observe(el);
+		// The container's size doesn't change when its *content* widens (async data,
+		// column resize/visibility), but scrollWidth does — watch the content too,
+		// or the scrollbar never appears/updates until the next container resize.
+		if (el.firstElementChild) {
+			ro.observe(el.firstElementChild);
+		}
 		update();
 		return () => {
 			el.removeEventListener('scroll', update);
@@ -62,15 +83,21 @@ export default function PinnedScrollbar({
 		(e: React.MouseEvent) => {
 			e.preventDefault();
 			const el = scrollRef.current;
-			if (!el) return;
+			if (!el) {
+				return;
+			}
 			isDragging.current = true;
 			dragStartX.current = e.clientX;
 			dragStartScroll.current = el.scrollLeft;
 
 			const onMove = (ev: MouseEvent) => {
-				if (!isDragging.current) return;
+				if (!isDragging.current) {
+					return;
+				}
 				const track = trackRef.current;
-				if (!el || !track) return;
+				if (!el || !track) {
+					return;
+				}
 				const { scrollWidth, clientWidth } = el;
 				const trackWidth = track.clientWidth;
 				const tw = Math.max((clientWidth / scrollWidth) * trackWidth, 30);
@@ -78,7 +105,11 @@ export default function PinnedScrollbar({
 				const maxScroll = scrollWidth - clientWidth;
 				const dx = ev.clientX - dragStartX.current;
 				const scrollDelta = (dx / maxThumbLeft) * maxScroll;
-				el.scrollLeft = Math.max(0, Math.min(maxScroll, dragStartScroll.current + scrollDelta));
+				// scrollLeft's valid range is [-maxScroll, 0] in RTL, [0, maxScroll] in LTR
+				const isRTL = getComputedStyle(el).direction === 'rtl';
+				const min = isRTL ? -maxScroll : 0;
+				const max = isRTL ? 0 : maxScroll;
+				el.scrollLeft = Math.max(min, Math.min(max, dragStartScroll.current + scrollDelta));
 			};
 
 			const onUp = () => {
@@ -96,7 +127,9 @@ export default function PinnedScrollbar({
 	const handleThumbKeyDown = React.useCallback(
 		(e: React.KeyboardEvent<HTMLDivElement>) => {
 			const el = scrollRef.current;
-			if (!el) return;
+			if (!el) {
+				return;
+			}
 			const step = el.clientWidth * 0.1;
 			if (e.key === 'ArrowLeft') {
 				e.preventDefault();
@@ -109,7 +142,8 @@ export default function PinnedScrollbar({
 				el.scrollLeft = 0;
 			} else if (e.key === 'End') {
 				e.preventDefault();
-				el.scrollLeft = el.scrollWidth;
+				// End = end of content: fully negative in RTL; the browser clamps either way
+				el.scrollLeft = getComputedStyle(el).direction === 'rtl' ? -el.scrollWidth : el.scrollWidth;
 			}
 		},
 		[scrollRef],
@@ -119,28 +153,37 @@ export default function PinnedScrollbar({
 	const handleTrackClick = React.useCallback(
 		(e: React.MouseEvent<HTMLDivElement>) => {
 			const thumb = thumbRef.current;
-			if (thumb && thumb.contains(e.target as Node)) return;
+			if (thumb && thumb.contains(e.target as Node)) {
+				return;
+			}
 			const el = scrollRef.current;
 			const track = trackRef.current;
-			if (!el || !track) return;
+			if (!el || !track) {
+				return;
+			}
 			const rect = track.getBoundingClientRect();
 			const clickX = e.clientX - rect.left;
 			const { scrollWidth, clientWidth } = el;
 			const direction = clickX < thumbLeft ? -1 : 1;
-			el.scrollLeft = Math.max(0, Math.min(scrollWidth - clientWidth, el.scrollLeft + direction * clientWidth * 0.8));
+			const maxScroll = scrollWidth - clientWidth;
+			const isRTL = getComputedStyle(el).direction === 'rtl';
+			const min = isRTL ? -maxScroll : 0;
+			const max = isRTL ? 0 : maxScroll;
+			el.scrollLeft = Math.max(min, Math.min(max, el.scrollLeft + direction * clientWidth * 0.8));
 		},
 		[scrollRef, thumbLeft],
 	);
 
-	if (!visible) return null;
+	if (!visible) {
+		return null;
+	}
 
 	return (
-		// eslint-disable-next-line jsx-a11y/click-events-have-key-events -- track click is mouse-only; keyboard users scroll via the thumb
 		<div
 			className="rdt_pinnedScrollbarTrack"
 			ref={trackRef}
 			role="presentation"
-			style={{ marginLeft: leftInset, marginRight: rightInset }}
+			style={{ marginInlineStart: leftInset, marginInlineEnd: rightInset }}
 			onClick={handleTrackClick}
 		>
 			<div

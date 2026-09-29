@@ -1,5 +1,13 @@
 import React from 'react';
-import { useColumns, useTableState, useTableData, useColumnFilter, type TableColumn, type FilterState } from 'react-data-table-component';
+import {
+	useColumns,
+	useTableState,
+	useTableData,
+	useColumnFilter,
+	SortOrder,
+	type TableColumn,
+	type FilterState,
+} from 'react-data-table-component';
 
 interface Employee {
 	id: number;
@@ -68,7 +76,7 @@ export default function HeadlessDemo() {
 		onChangeRowsPerPage: () => {},
 	});
 
-	const { selectedColumn, sortDirection, currentPage, rowsPerPage } = tableState;
+	const { selectedColumn, sortDirection, sortColumns, currentPage, rowsPerPage } = tableState;
 
 	// 3. Sorted + paginated rows
 	const { sortedData, tableRows } = useTableData<Employee>({
@@ -76,6 +84,7 @@ export default function HeadlessDemo() {
 		columns: tableColumns,
 		selectedColumn,
 		sortDirection,
+		sortColumns,
 		currentPage,
 		rowsPerPage,
 		pagination: true,
@@ -93,9 +102,15 @@ export default function HeadlessDemo() {
 
 	function clickSort(col: TableColumn<Employee>) {
 		if (!col.sortable) return;
-		const isAsc = selectedColumn?.id === col.id && (tableState.sortDirection as string) === 'asc';
-		const newDir = (isAsc ? 'desc' : 'asc') as typeof tableState.sortDirection;
-		handleSort({ type: 'SORT_CHANGE', selectedColumn: col, sortDirection: newDir, clearSelectedOnSort: false });
+		const isAsc = selectedColumn?.id === col.id && tableState.sortDirection === SortOrder.ASC;
+		handleSort({
+			type: 'SORT_CHANGE',
+			selectedColumn: col,
+			clearSelectedOnSort: false,
+			additive: false,
+			defaultSortDirection: SortOrder.ASC,
+			direction: isAsc ? SortOrder.DESC : SortOrder.ASC,
+		});
 	}
 
 	return (

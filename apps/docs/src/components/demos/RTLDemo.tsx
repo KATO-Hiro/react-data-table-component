@@ -12,18 +12,39 @@ interface Employee {
 }
 
 const data: Employee[] = [
-	{ id: 1,  name: 'Aria Chen',     nameAr: 'أريا تشن',      department: 'Engineering', departmentAr: 'هندسة',    salary: 155000 },
-	{ id: 2,  name: 'Marcus Webb',   nameAr: 'ماركوس ويب',    department: 'Product',     departmentAr: 'منتج',     salary: 132000 },
-	{ id: 3,  name: 'Priya Kapoor',  nameAr: 'بريا كابور',    department: 'Design',      departmentAr: 'تصميم',    salary: 118000 },
-	{ id: 4,  name: 'Jordan Ellis',  nameAr: 'جوردان إليس',   department: 'Analytics',   departmentAr: 'تحليلات',  salary: 143000 },
-	{ id: 5,  name: 'Sam Rivera',    nameAr: 'سام ريفيرا',    department: 'Engineering', departmentAr: 'هندسة',    salary: 128000 },
-	{ id: 6,  name: 'Taylor Brooks', nameAr: 'تايلور بروكس',  department: 'Sales',       departmentAr: 'مبيعات',   salary: 97000  },
-	{ id: 7,  name: 'Morgan Lee',    nameAr: 'مورغان لي',     department: 'Engineering', departmentAr: 'هندسة',    salary: 162000 },
-	{ id: 8,  name: 'Casey Park',    nameAr: 'كيسي بارك',     department: 'Design',      departmentAr: 'تصميم',    salary: 109000 },
-	{ id: 9,  name: 'Drew Santos',   nameAr: 'درو سانتوس',    department: 'Product',     departmentAr: 'منتج',     salary: 138000 },
-	{ id: 10, name: 'Avery Johnson', nameAr: 'أفيري جونسون',  department: 'Sales',       departmentAr: 'مبيعات',   salary: 104000 },
-	{ id: 11, name: 'Quinn Torres',  nameAr: 'كوين توريس',    department: 'Design',      departmentAr: 'تصميم',    salary: 109000 },
-	{ id: 12, name: 'Devon Walsh',   nameAr: 'ديفون والش',    department: 'Engineering', departmentAr: 'هندسة',    salary: 134000 },
+	{ id: 1, name: 'Aria Chen', nameAr: 'أريا تشن', department: 'Engineering', departmentAr: 'هندسة', salary: 155000 },
+	{ id: 2, name: 'Marcus Webb', nameAr: 'ماركوس ويب', department: 'Product', departmentAr: 'منتج', salary: 132000 },
+	{ id: 3, name: 'Priya Kapoor', nameAr: 'بريا كابور', department: 'Design', departmentAr: 'تصميم', salary: 118000 },
+	{
+		id: 4,
+		name: 'Jordan Ellis',
+		nameAr: 'جوردان إليس',
+		department: 'Analytics',
+		departmentAr: 'تحليلات',
+		salary: 143000,
+	},
+	{ id: 5, name: 'Sam Rivera', nameAr: 'سام ريفيرا', department: 'Engineering', departmentAr: 'هندسة', salary: 128000 },
+	{ id: 6, name: 'Taylor Brooks', nameAr: 'تايلور بروكس', department: 'Sales', departmentAr: 'مبيعات', salary: 97000 },
+	{ id: 7, name: 'Morgan Lee', nameAr: 'مورغان لي', department: 'Engineering', departmentAr: 'هندسة', salary: 162000 },
+	{ id: 8, name: 'Casey Park', nameAr: 'كيسي بارك', department: 'Design', departmentAr: 'تصميم', salary: 109000 },
+	{ id: 9, name: 'Drew Santos', nameAr: 'درو سانتوس', department: 'Product', departmentAr: 'منتج', salary: 138000 },
+	{
+		id: 10,
+		name: 'Avery Johnson',
+		nameAr: 'أفيري جونسون',
+		department: 'Sales',
+		departmentAr: 'مبيعات',
+		salary: 104000,
+	},
+	{ id: 11, name: 'Quinn Torres', nameAr: 'كوين توريس', department: 'Design', departmentAr: 'تصميم', salary: 109000 },
+	{
+		id: 12,
+		name: 'Devon Walsh',
+		nameAr: 'ديفون والش',
+		department: 'Engineering',
+		departmentAr: 'هندسة',
+		salary: 134000,
+	},
 ];
 
 const DIRECTIONS = [
@@ -39,13 +60,20 @@ export default function RTLDemo() {
 	const columns: TableColumn<Employee>[] = [
 		{
 			name: isRTL ? 'الاسم' : 'Name',
-			selector: r => isRTL ? r.nameAr : r.name,
+			selector: r => (isRTL ? r.nameAr : r.name),
 			sortable: true,
+			filterable: true,
+			width: '200px',
+			minWidth: '120px',
+			reorder: true,
 		},
 		{
 			name: isRTL ? 'القسم' : 'Department',
-			selector: r => isRTL ? r.departmentAr : r.department,
+			selector: r => (isRTL ? r.departmentAr : r.department),
 			sortable: true,
+			filterable: true,
+			minWidth: '140px',
+			reorder: true,
 		},
 		{
 			name: isRTL ? 'الراتب' : 'Salary',
@@ -53,6 +81,10 @@ export default function RTLDemo() {
 			format: r => `$${r.salary.toLocaleString()}`,
 			right: true,
 			sortable: true,
+			filterable: true,
+			filterType: 'number',
+			width: '140px',
+			reorder: true,
 		},
 	];
 
@@ -86,6 +118,8 @@ export default function RTLDemo() {
 				paginationPerPage={5}
 				highlightOnHover
 				striped
+				resizable
+				contextMenu
 			/>
 		</div>
 	);

@@ -8,7 +8,8 @@ import NativePagination from './Pagination';
 import DataTableHead from './DataTableHead';
 import DataTableBody from './DataTableBody';
 import TablePaginationFooter from './TablePaginationFooter';
-import { getNumberOfPages, recalculatePage, getPinnedOffsets, getPinnedTotalWidths } from '../util';
+import TableFooter from './TableFooter';
+import { getNumberOfPages, recalculatePage } from '../util';
 import PinnedScrollbar from './PinnedScrollbar';
 import { defaultProps, DEFAULT_EXPANDABLE_ICON, DEFAULT_PAGINATION_ICONS } from '../defaultProps';
 import { createStyles } from '../styles';
@@ -20,11 +21,42 @@ import { HeadContext } from '../context/HeadContext';
 import useColumns from '../hooks/useColumns';
 import useTableState from '../hooks/useTableState';
 import useTableData from '../hooks/useTableData';
-import useColumnFilter from '../hooks/useColumnFilter';
-import useColumnResize from '../hooks/useColumnResize';
+import useColumnFilter, { isFilterActive } from '../hooks/useColumnFilter';
+import useColumnResize, { useResizeSlice } from '../hooks/useColumnResize';
+import useRTL from '../hooks/useRTL';
 import useRowContextValue from '../hooks/useRowContextValue';
+import useRowEvents from '../hooks/useRowEvents';
+import useExpansion from '../hooks/useExpansion';
+import useSelection from '../hooks/useSelection';
+import useSorting from '../hooks/useSorting';
 import useHeadContextValue from '../hooks/useHeadContextValue';
+import useIsomorphicLayoutEffect from '../hooks/useIsomorphicLayoutEffect';
 import { useColorMode } from '../hooks/useColorMode';
+import useCellNavigation from '../hooks/useCellNavigation';
+import useColumnPinning from '../hooks/useColumnPinning';
+import useSortFlipAnimation from '../hooks/useSortFlipAnimation';
+import useContextMenu from '../hooks/useContextMenu';
+import ContextMenu from './ContextMenu';
+
+function getColSepClass(columnSeparator: boolean | 'subtle' | 'full'): string | undefined {
+	if (columnSeparator === 'full') {
+		return 'rdt_colSeparatorFull';
+	}
+
+	return columnSeparator ? 'rdt_colSeparator' : undefined;
+}
+
+function getHeadSepClass(headerSeparator: boolean | 'subtle' | 'full'): string | undefined {
+	if (headerSeparator === false) {
+		return undefined;
+	}
+
+	if (headerSeparator === 'full') {
+		return 'rdt_headSeparatorFull';
+	}
+
+	return 'rdt_headSeparator';
+}
 
 function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTableHandle>): JSX.Element {
 	const {
@@ -42,10 +74,12 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		selectableRowsHighlight = defaultProps.selectableRowsHighlight,
 		selectableRowsNoSelectAll = defaultProps.selectableRowsNoSelectAll,
 		selectableRowsVisibleOnly = defaultProps.selectableRowsVisibleOnly,
+		selectableRowsRange = true,
 		selectableRowSelected = defaultProps.selectableRowSelected,
 		selectableRowDisabled = defaultProps.selectableRowDisabled,
 		selectableRowsComponent: selectableRowsComponentProp,
 		selectableRowsComponentProps: selectableRowsComponentPropsProp,
+		selectedRows: controlledSelectedRows,
 		onRowExpandToggled = defaultProps.onRowExpandToggled,
 		onSelectedRowsChange = defaultProps.onSelectedRowsChange,
 		onChangeRowsPerPage = defaultProps.onChangeRowsPerPage,
@@ -54,14 +88,17 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		paginationServerOptions = defaultProps.paginationServerOptions,
 		paginationTotalRows = defaultProps.paginationTotalRows,
 		paginationDefaultPage = defaultProps.paginationDefaultPage,
+		paginationPage,
 		paginationResetDefaultPage = defaultProps.paginationResetDefaultPage,
 		paginationPerPage = defaultProps.paginationPerPage,
+		paginationPosition = defaultProps.paginationPosition,
 		paginationRowsPerPageOptions = defaultProps.paginationRowsPerPageOptions,
 		paginationComponent = defaultProps.paginationComponent,
 		paginationComponentOptions = defaultProps.paginationComponentOptions,
 		responsive = defaultProps.responsive,
 		progressPending = defaultProps.progressPending,
 		progressComponent = defaultProps.progressComponent,
+		progressSkeleton = defaultProps.progressSkeleton,
 		persistTableHead = defaultProps.persistTableHead,
 		noDataComponent = defaultProps.noDataComponent,
 		disabled = defaultProps.disabled,
@@ -79,9 +116,12 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		onRowMiddleClicked = defaultProps.onRowMiddleClicked,
 		onRowMouseEnter = defaultProps.onRowMouseEnter,
 		onRowMouseLeave = defaultProps.onRowMouseLeave,
+		onScroll,
 		onSort = defaultProps.onSort,
 		sortFunction = defaultProps.sortFunction,
 		sortServer = defaultProps.sortServer,
+		filterServer = defaultProps.filterServer,
+		sortMulti = defaultProps.sortMulti,
 		expandableRowsComponent = defaultProps.expandableRowsComponent,
 		expandableRowsComponentProps = defaultProps.expandableRowsComponentProps,
 		expandableRowDisabled = defaultProps.expandableRowDisabled,
@@ -102,18 +142,38 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		columnGroups,
 		filterValues: controlledFilterValues,
 		onFilterChange: onFilterChangeProp,
+		contextMenu,
+		contextMenuActions,
+		onContextMenuAction,
+		localization: localizationProp,
+		columnFilterOptions,
+		expandableRowsOptions,
 		resizable = false,
 		initialColumnWidths,
 		onColumnResize,
 		animateRows = false,
+		cellNavigation = false,
 		columnSeparator,
 		headerSeparator,
+		footerComponent,
+		showFooter,
 		className,
 		ariaLabel,
 	} = props;
 
+	// Memoized: the resolved sub-objects feed context memo dep lists and feature-slice
+	// memos, so their identity must only change when the underlying props change.
+	const localization = React.useMemo(
+		() => ({
+			...localizationProp,
+			filter: { ...columnFilterOptions, ...localizationProp?.filter },
+			expandable: { ...expandableRowsOptions, ...localizationProp?.expandable },
+			contextMenu: localizationProp?.contextMenu ?? {},
+		}),
+		[localizationProp, columnFilterOptions, expandableRowsOptions],
+	);
+
 	// Intentionally reading @deprecated props for backward compat; cast prevents TS hint 6385 here
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const {
 		sortIcon: sortIconProp,
 		expandableIcon: expandableIconProp,
@@ -124,7 +184,11 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 	// ── Icon resolution: theme.icons → prop override ─────────────────────────
 	const themeObj = React.useMemo(() => resolveThemeObject(theme), [theme]);
 	const sortIcon = sortIconProp ?? themeObj.icons?.sort ?? null;
-	const expandableIcon = { ...DEFAULT_EXPANDABLE_ICON, ...themeObj.icons?.expandable, ...expandableIconProp };
+	// Memoized: feeds the expansion feature slice, whose identity must be stable.
+	const expandableIcon = React.useMemo(
+		() => ({ ...DEFAULT_EXPANDABLE_ICON, ...themeObj.icons?.expandable, ...expandableIconProp }),
+		[themeObj, expandableIconProp],
+	);
 	const paginationIcons = { ...DEFAULT_PAGINATION_ICONS, ...themeObj.icons?.pagination, ...paginationIconsProp };
 	const selectableRowsComponent = selectableRowsComponentProp ?? defaultProps.selectableRowsComponent;
 	const selectableRowsComponentProps = selectableRowsComponentPropsProp ?? defaultProps.selectableRowsComponentProps;
@@ -144,30 +208,21 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 	}, []);
 
 	const tableId = React.useId();
-	const [, startTransition] = React.useTransition();
-	const { filterValues, handleFilterChange, filteredData } = useColumnFilter(
-		columns,
-		controlledFilterValues,
-		onFilterChangeProp,
-	);
 
 	// ── Column resize state ────────────────────────────────────────────────────
-	const { columnWidths, handleResizeStart } = useColumnResize({ initialColumnWidths, onColumnResize });
+	const isRTL = useRTL(direction);
+	const { columnWidths, handleResizeStart } = useColumnResize({ initialColumnWidths, onColumnResize, isRTL });
+	const resize = useResizeSlice(resizable, handleResizeStart);
 
 	const {
 		tableColumns,
 		tableGroups,
 		draggingColumnId,
 		draggingGroupKey,
-		handleDragStart,
-		handleDragEnter,
-		handleDragOver,
-		handleDragLeave,
-		handleDragEnd,
-		handleGroupDragStart,
-		handleGroupDragEnter,
-		handleGroupDragOver,
-		handleGroupDragEnd,
+		columnDrag,
+		handlePinColumn,
+		handleHideColumn,
+		handleResetColumns,
 		defaultSortDirection,
 		defaultSortColumn,
 	} = useColumns(
@@ -179,40 +234,25 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		defaultSortAsc,
 	);
 
-	// Pinning is incompatible with CSS-grid group headers — strip it when groups are active
-	const hasGroups = tableGroups.length > 0 || (columnGroups != null && columnGroups.length > 0);
-	const hasStrippedPinsRef = React.useRef(false);
-	const effectiveColumns = React.useMemo(() => {
-		if (!hasGroups) return tableColumns;
-		const stripped = tableColumns.map(c => {
-			if (!c.pinned) return c;
-			const { pinned: _p, ...rest } = c;
-			return rest as typeof c;
-		});
-		const hadPins = tableColumns.some(c => c.pinned);
-		if (hadPins && !hasStrippedPinsRef.current) {
-			hasStrippedPinsRef.current = true;
-			console.warn(
-				'DataTable: column pinning is not supported alongside columnGroups. ' +
-					'`pinned` has been stripped from affected columns. ' +
-					'Remove `columnGroups` or remove `pinned` from your column definitions to use pinning.',
-			);
-		}
-		return stripped;
-	}, [hasGroups, tableColumns]);
+	// Filter against the decorated columns (ids auto-assigned by useColumns) so the
+	// head, matcher, and context-menu keying all agree — a column with no explicit
+	// id still filters. Passing raw `columns` here would leave them id-less.
+	const { filterValues, handleFilterChange, filteredData, filtering } = useColumnFilter(tableColumns, {
+		filterValues: controlledFilterValues,
+		onFilterChange: onFilterChangeProp,
+		localization: localization.filter,
+		rows: data,
+	});
 
-	const pinnedOffsets = React.useMemo(
-		() => getPinnedOffsets(effectiveColumns, columnWidths, selectableRows, expandableRows, expandableRowsHideExpander),
-		[effectiveColumns, columnWidths, selectableRows, expandableRows, expandableRowsHideExpander],
-	);
-
-	const pinnedTotalWidths = React.useMemo(
-		() =>
-			getPinnedTotalWidths(effectiveColumns, columnWidths, selectableRows, expandableRows, expandableRowsHideExpander),
-		[effectiveColumns, columnWidths, selectableRows, expandableRows, expandableRowsHideExpander],
-	);
-
-	const hasPinnedColumns = pinnedTotalWidths.left > 0 || pinnedTotalWidths.right > 0;
+	const { effectiveColumns, pinnedOffsets, pinnedTotalWidths, hasPinnedColumns } = useColumnPinning({
+		tableColumns,
+		tableGroups,
+		columnGroups,
+		columnWidths,
+		selectableRows,
+		expandableRows,
+		expandableRowsHideExpander,
+	});
 	const scrollWrapperRef = React.useRef<HTMLDivElement>(null);
 
 	const {
@@ -220,9 +260,11 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		handleSort: dispatchSort,
 		handleSelectAllRows,
 		handleSelectedRow,
+		handleSelectedRange,
 		handleChangePage: handleChangePageState,
 		handleChangeRowsPerPage: handleChangeRowsPerPageState,
 		handleClearSelectedRows,
+		handleClearSort,
 	} = useTableState({
 		data,
 		keyField,
@@ -238,41 +280,37 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		selectableRowsVisibleOnly,
 		selectableRowSelected,
 		clearSelectedRows,
+		paginationPage,
 		paginationResetDefaultPage,
+		controlledSelectedRows,
 		onSelectedRowsChange,
 		onSort,
 		onChangePage,
 		onChangeRowsPerPage,
 	});
 
-	React.useImperativeHandle(ref, () => ({ clearSelectedRows: handleClearSelectedRows }), [handleClearSelectedRows]);
+	// Refs for Shift-click range selection: visibleRowsRef holds the current visible-rows
+	// snapshot so the row-checkbox can compute a contiguous slice without prop-drilling;
+	// lastSelectedKeyRef is the anchor row (set on the most recent single toggle).
+	const visibleRowsRef = React.useRef<T[]>([]);
+	const lastSelectedKeyRef = React.useRef<string | number | null>(null);
 
-	// Snapshot row Y-positions synchronously before dispatching sort, so
-	// DataTableBody can FLIP rows from their old positions to the new ones.
-	const bodyRef = React.useRef<HTMLDivElement>(null);
-	const prevRowTopsRef = React.useRef<Map<string | number, number>>(new Map());
+	React.useImperativeHandle(ref, () => ({ clearSelectedRows: handleClearSelectedRows, clearSort: handleClearSort }), [
+		handleClearSelectedRows,
+		handleClearSort,
+	]);
 
-	const handleSort = React.useCallback(
-		(action: Parameters<typeof dispatchSort>[0]) => {
-			if (bodyRef.current) {
-				const snapshot = new Map<string | number, number>();
-				bodyRef.current.querySelectorAll<HTMLElement>('[id^="row-"]').forEach(el => {
-					snapshot.set(el.id.slice(4), el.getBoundingClientRect().top);
-				});
-				prevRowTopsRef.current = snapshot;
-			}
-			startTransition(() => dispatchSort(action));
-		},
-		[dispatchSort],
-	);
+	const { bodyRef, prevRowTopsRef, handleSort } = useSortFlipAnimation(dispatchSort);
 
-	const { rowsPerPage, currentPage, selectedRows, allSelected, selectedColumn, sortDirection } = tableState;
+	const { rowsPerPage, currentPage, selectedRows, allSelected, selectedColumn, sortDirection, sortColumns } =
+		tableState;
 
 	const { sortedData, tableRows } = useTableData({
 		data,
 		columns,
 		selectedColumn,
 		sortDirection,
+		sortColumns,
 		currentPage,
 		rowsPerPage,
 		pagination,
@@ -283,11 +321,54 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 	});
 
 	// ── Client-side column filtering ───────────────────────────────────────────
-	const filteredSortedData = React.useMemo(() => filteredData(sortedData), [filteredData, sortedData]);
-	const filteredTableRows = React.useMemo(() => filteredData(tableRows), [filteredData, tableRows]);
+	// Filtering must run on the full sorted set *before* pagination slices it,
+	// otherwise a filter only ever matches rows on the current page. For client
+	// pagination we therefore slice filteredSortedData ourselves; the no-pagination
+	// case passes tableRows (already the full set) through.
+	//
+	// Server-filtered data is already filtered, and the table only holds the rows the
+	// server sent, so running the matcher again would drop rows the server chose to
+	// return. paginationServer implies it: a page cannot be filtered against rows it
+	// does not hold.
+	const isFilterServer = filterServer || (pagination && paginationServer);
+	const applyFilter = React.useCallback(
+		(rows: T[]) => (isFilterServer ? rows : filteredData(rows)),
+		[isFilterServer, filteredData],
+	);
+	const filteredSortedData = React.useMemo(() => applyFilter(sortedData), [applyFilter, sortedData]);
+	const filteredTableRows = React.useMemo(() => {
+		if (pagination && !paginationServer) {
+			const lastIndex = currentPage * rowsPerPage;
+			return filteredSortedData.slice(lastIndex - rowsPerPage, lastIndex);
+		}
+		return applyFilter(tableRows);
+	}, [pagination, paginationServer, currentPage, rowsPerPage, filteredSortedData, applyFilter, tableRows]);
 
 	const { persistSelectedOnSort = false, persistSelectedOnPageChange = false } = paginationServerOptions;
 	const mergeSelections = !!(paginationServer && (persistSelectedOnPageChange || persistSelectedOnSort));
+
+	// ── Context menu ───────────────────────────────────────────────────────────
+	// Slices pass through to the contexts untouched — consumers read menu.header /
+	// menu.row directly, so new feature fields never touch this file.
+	const menu = useContextMenu({
+		contextMenu,
+		contextMenuActions,
+		onContextMenuAction,
+		localization: localization.contextMenu,
+		tableColumns,
+		columnGroups,
+		sortColumns,
+		defaultSortDirection,
+		clearSelectedOnSort:
+			(pagination && paginationServer && !persistSelectedOnSort) || sortServer || selectableRowsVisibleOnly,
+		filterValues,
+		onSort: handleSort,
+		onClearSort: handleClearSort,
+		onFilterChange: handleFilterChange,
+		onPinColumn: handlePinColumn,
+		onHideColumn: handleHideColumn,
+		onResetColumns: handleResetColumns,
+	});
 	const enabledPagination = pagination && !progressPending && data.length > 0;
 	const Pagination = paginationComponent || NativePagination;
 	const tableStyles = React.useMemo(() => createStyles(customStyles), [customStyles]);
@@ -302,9 +383,41 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		[handleChangeRowsPerPageState, filteredTableRows.length],
 	);
 
-	const showTableHead = !noTableHead && (persistTableHead || progressPending || filteredSortedData.length > 0);
+	// An active column filter must keep the head visible even with zero matches —
+	// the filter UI lives in the head, so hiding it would strand the filter.
+	const hasActiveFilters = React.useMemo(() => Object.values(filterValues).some(isFilterActive), [filterValues]);
+	const showTableHead =
+		!noTableHead && (persistTableHead || progressPending || hasActiveFilters || filteredSortedData.length > 0);
 	const showHeader = !noHeader && !!(title || actions);
 
+	// ── Cell navigation ────────────────────────────────────────────────────────
+	const {
+		activeCell: effectiveActiveCell,
+		handleNavFocus,
+		handleNavKeyDown,
+	} = useCellNavigation({
+		cellNavigation,
+		selectableRows,
+		expandableRows,
+		expandableRowsHideExpander,
+		effectiveColumns,
+		filteredTableRowCount: filteredTableRows.length,
+		showTableHead,
+	});
+
+	// Footer renders when explicitly enabled, when a footerComponent is provided,
+	// or when at least one visible column declares a `footer`. `showFooter={false}`
+	// suppresses the row entirely (overrides both column footers and footerComponent).
+	const hasColumnFooter = React.useMemo(
+		() => effectiveColumns.some(c => !c.omit && c.footer !== undefined),
+		[effectiveColumns],
+	);
+	const showFooterRow =
+		showFooter !== false && !progressPending && (showFooter === true || !!footerComponent || hasColumnFooter);
+
+	// Intentional dispatch during render ("adjusting state when props change" pattern):
+	// when filtering strands currentPage past the last page, clamp it before commit so
+	// the empty page never paints.
 	if (pagination && !paginationServer && filteredSortedData.length > 0 && filteredTableRows.length === 0) {
 		handleChangePage(recalculatePage(currentPage, getNumberOfPages(filteredSortedData.length, rowsPerPage)));
 	}
@@ -312,7 +425,74 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 	const visibleRows = selectableRowsVisibleOnly ? filteredTableRows : filteredSortedData;
 	const showSelectAll = persistSelectedOnPageChange || selectableRowsSingle || selectableRowsNoSelectAll;
 
+	// Keep the ref pointed at the current visible page rows so Shift-click selection
+	// computes the slice against what's actually on screen, not the full dataset.
+	// We mutate in a layout effect so the ref is up-to-date before any click handler
+	// (which runs after commit) reads from it. Falls back to useEffect on the server
+	// to avoid the SSR mismatch warning.
+	useIsomorphicLayoutEffect(() => {
+		visibleRowsRef.current = filteredTableRows;
+	}, [filteredTableRows]);
+
+	const sorting = useSorting<T>({
+		sortDirection,
+		sortColumns,
+		sortDisabled: progressPending || filteredSortedData.length === 0,
+		sortMulti,
+		defaultSortDirection,
+		sortIcon,
+		sortServer,
+		pagination,
+		paginationServer,
+		persistSelectedOnSort,
+		selectableRowsVisibleOnly,
+		onSort: handleSort,
+	});
+
+	const selection = useSelection<T>({
+		selectableRows,
+		component: selectableRowsComponent,
+		componentProps: selectableRowsComponentProps,
+		highlight: selectableRowsHighlight,
+		single: selectableRowsSingle,
+		disabled: selectableRowDisabled,
+		range: selectableRowsRange,
+		onSelectedRow: handleSelectedRow,
+		onSelectedRange: handleSelectedRange,
+		visibleRowsRef,
+		lastSelectedKeyRef,
+		allSelected,
+		selectedRows,
+		visibleRows,
+		keyField,
+		mergeSelections,
+		hideSelectAll: showSelectAll,
+		onSelectAllRows: handleSelectAllRows,
+	});
+
+	const expansion = useExpansion<T>({
+		expandableRows,
+		icon: expandableIcon,
+		component: expandableRowsComponent,
+		componentProps: expandableRowsComponentProps,
+		hideExpander: expandableRowsHideExpander,
+		expandOnRowClicked,
+		expandOnRowDoubleClicked,
+		inheritConditionalStyles: expandableInheritConditionalStyles,
+		onToggled: onRowExpandToggled,
+		localization: localization.expandable,
+	});
+
+	const rowEvents = useRowEvents<T>({
+		onRowClicked,
+		onRowDoubleClicked,
+		onRowMiddleClicked,
+		onRowMouseEnter,
+		onRowMouseLeave,
+	});
+
 	const rowContextValue = useRowContextValue<T>({
+		tableId,
 		keyField,
 		columns: effectiveColumns,
 		dense,
@@ -320,91 +500,55 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 		highlightOnHover,
 		pointerOnHover,
 		conditionalRowStyles,
-		selectableRows,
-		selectableRowsComponent,
-		selectableRowsComponentProps,
-		selectableRowsHighlight,
-		selectableRowsSingle,
-		selectableRowDisabled,
-		expandableRows,
-		expandableIcon,
-		expandableRowsComponent,
-		expandableRowsComponentProps,
-		expandableRowsHideExpander,
-		expandOnRowClicked,
-		expandOnRowDoubleClicked,
-		expandableInheritConditionalStyles,
-		onRowClicked,
-		onRowDoubleClicked,
-		onRowMiddleClicked,
-		onRowMouseEnter,
-		onRowMouseLeave,
-		onRowExpandToggled,
-		onSelectedRow: handleSelectedRow,
-		onDragStart: handleDragStart,
-		onDragOver: handleDragOver,
-		onDragEnd: handleDragEnd,
-		onDragEnter: handleDragEnter,
-		onDragLeave: handleDragLeave,
+		selection: selection.row,
+		expansion,
+		rowEvents,
+		columnDrag,
 		columnWidths,
 		pinnedOffsets,
 		animateRows,
+		cellNavigation,
+		activeCell: effectiveActiveCell,
+		rowMenu: menu.row,
 	});
 
 	const headContextValue = useHeadContextValue<T>({
-		selectedColumn,
-		sortDirection,
-		sortIcon,
-		sortServer,
-		pagination,
-		paginationServer,
-		persistSelectedOnSort,
-		selectableRowsVisibleOnly,
+		tableId,
+		sorting,
 		fixedHeader,
 		dense,
 		draggingColumnId,
 		draggingGroupKey,
-		filterValues,
+		filtering,
 		columnWidths,
 		pinnedOffsets,
-		resizable,
-		keyField,
-		mergeSelections,
-		allSelected,
-		selectedRows,
-		visibleRows,
-		selectableRowsComponent,
-		selectableRowsComponentProps,
-		selectableRowDisabled,
-		showSelectAll,
-		progressPending,
-		sortedData: filteredSortedData,
-		onSelectAllRows: handleSelectAllRows,
-		onSort: handleSort,
-		onFilterChange: handleFilterChange,
-		onResizeStart: resizable ? handleResizeStart : undefined,
-		onDragStart: handleDragStart,
-		onDragOver: handleDragOver,
-		onDragEnd: handleDragEnd,
-		onDragEnter: handleDragEnter,
-		onDragLeave: handleDragLeave,
-		onGroupDragStart: handleGroupDragStart,
-		onGroupDragEnter: handleGroupDragEnter,
-		onGroupDragOver: handleGroupDragOver,
-		onGroupDragEnd: handleGroupDragEnd,
+		resize,
+		selectAll: selection.selectAll,
+		cellNavigation,
+		activeCell: effectiveActiveCell,
+		headerMenu: menu.header,
+		columnDrag,
 	});
+
+	const paginationFooterProps = {
+		Pagination,
+		onChangePage: handleChangePage,
+		onChangeRowsPerPage: handleChangeRowsPerPage,
+		rowCount: paginationTotalRows || filteredSortedData.length,
+		currentPage,
+		rowsPerPage,
+		direction,
+		paginationRowsPerPageOptions,
+		paginationIcons,
+		paginationComponentOptions,
+		localization: localization.pagination,
+	};
 
 	// Prop wins; if not explicitly passed, fall back to what the theme declares, then built-in defaults.
 	const effectiveColumnSep = columnSeparator !== undefined ? columnSeparator : (themeObj.columnSeparator ?? false);
 	const effectiveHeaderSep = headerSeparator !== undefined ? headerSeparator : (themeObj.headerSeparator ?? true);
-	const sepClass =
-		effectiveColumnSep === 'full' ? 'rdt_colSeparatorFull' : effectiveColumnSep ? 'rdt_colSeparator' : undefined;
-	const headSepClass =
-		effectiveHeaderSep === false
-			? undefined
-			: effectiveHeaderSep === 'full'
-				? 'rdt_headSeparatorFull'
-				: 'rdt_headSeparator';
+	const sepClass = getColSepClass(effectiveColumnSep);
+	const headSepClass = getHeadSepClass(effectiveHeaderSep);
 
 	return (
 		<StylesContext.Provider value={tableStyles}>
@@ -422,13 +566,19 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 							</Subheader>
 						)}
 
+						{enabledPagination && (paginationPosition === 'top' || paginationPosition === 'both') && (
+							<TablePaginationFooter {...paginationFooterProps} position="top" />
+						)}
+
 						<ResponsiveWrapper
 							ref={scrollWrapperRef}
 							$responsive={responsive}
 							$fixedHeader={fixedHeader}
 							$fixedHeaderScrollHeight={fixedHeaderScrollHeight}
-							$hiddenScrollbar={hasPinnedColumns}
+							$hiddenScrollbar={hasPinnedColumns && responsive}
+							$animateRows={animateRows}
 							className={className}
+							onScroll={onScroll}
 							{...wrapperProps}
 						>
 							<Wrapper>
@@ -436,8 +586,10 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 									id={tableId}
 									disabled={disabled}
 									className="rdt_Table"
-									role="table"
+									role={cellNavigation ? 'grid' : 'table'}
 									aria-busy={isBusy}
+									onKeyDown={cellNavigation ? handleNavKeyDown : undefined}
+									onFocus={cellNavigation ? handleNavFocus : undefined}
 									{...(ariaLabel && { 'aria-label': ariaLabel })}
 								>
 									{showTableHead && (
@@ -459,11 +611,23 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 										columnCount={tableColumns.length}
 										noDataComponent={noDataComponent}
 										progressComponent={progressComponent}
+										progressSkeleton={progressSkeleton}
 										expandableRowExpanded={expandableRowExpanded}
 										expandableRowDisabled={expandableRowDisabled}
 										bodyRef={bodyRef}
 										prevRowTopsRef={prevRowTopsRef}
 									/>
+
+									{showFooterRow && (
+										<TableFooter
+											columns={effectiveColumns}
+											rows={filteredSortedData}
+											selectableRows={selectableRows}
+											expandableRows={expandableRows}
+											expandableRowsHideExpander={expandableRowsHideExpander}
+											footerComponent={footerComponent}
+										/>
+									)}
 								</Table>
 							</Wrapper>
 						</ResponsiveWrapper>
@@ -476,18 +640,19 @@ function DataTableInner<T>(props: TableProps<T>, ref: React.ForwardedRef<DataTab
 							/>
 						)}
 
-						{enabledPagination && (
-							<TablePaginationFooter
-								Pagination={Pagination}
-								onChangePage={handleChangePage}
-								onChangeRowsPerPage={handleChangeRowsPerPage}
-								rowCount={paginationTotalRows || filteredSortedData.length}
-								currentPage={currentPage}
-								rowsPerPage={rowsPerPage}
-								direction={direction}
-								paginationRowsPerPageOptions={paginationRowsPerPageOptions}
-								paginationIcons={paginationIcons}
-								paginationComponentOptions={paginationComponentOptions}
+						{enabledPagination && (paginationPosition === 'bottom' || paginationPosition === 'both') && (
+							<TablePaginationFooter {...paginationFooterProps} />
+						)}
+
+						{menu.open && (
+							<ContextMenu
+								groups={menu.open.groups}
+								position={menu.open.position}
+								anchorRect={menu.open.anchorRect}
+								isRTL={isRTL}
+								ariaLabel={menu.open.ariaLabel}
+								onSelect={menu.onSelect}
+								onClose={menu.onClose}
 							/>
 						)}
 					</div>

@@ -42,10 +42,30 @@ describe('ColumnFilter:panel open/close', () => {
 		expect(container.querySelector('.rdt_filterPanel')).toBeNull();
 	});
 
+	test('pressing Escape inside a filter input closes the panel and refocuses the icon', () => {
+		const { container } = setup();
+		openPanel(container);
+		const input = container.querySelector('.rdt_filterInput') as HTMLInputElement;
+		input.focus();
+		fireEvent.keyDown(input, { key: 'Escape' });
+		expect(container.querySelector('.rdt_filterPanel')).toBeNull();
+		expect(document.activeElement).toBe(container.querySelector('.rdt_filterIcon'));
+	});
+
+	test('other keys in a filter input do not propagate to the table', () => {
+		const documentKeyDown = vi.fn();
+		document.addEventListener('keydown', documentKeyDown);
+		const { container } = setup();
+		openPanel(container);
+		fireEvent.keyDown(container.querySelector('.rdt_filterInput') as HTMLInputElement, { key: 'a' });
+		document.removeEventListener('keydown', documentKeyDown);
+		expect(documentKeyDown).not.toHaveBeenCalled();
+	});
+
 	test('clicking outside the panel closes it', () => {
 		const { container } = setup();
 		openPanel(container);
-		fireEvent.mouseDown(document.body);
+		fireEvent.pointerDown(document.body);
 		expect(container.querySelector('.rdt_filterPanel')).toBeNull();
 	});
 
@@ -53,6 +73,27 @@ describe('ColumnFilter:panel open/close', () => {
 		const { container } = setup();
 		openPanel(container);
 		openPanel(container);
+		expect(container.querySelector('.rdt_filterPanel')).toBeNull();
+	});
+
+	test('scrolling closes the panel', () => {
+		const { container } = setup();
+		openPanel(container);
+		fireEvent.scroll(document);
+		expect(container.querySelector('.rdt_filterPanel')).toBeNull();
+	});
+
+	test('scrolling inside the panel does not close it', () => {
+		const { container } = setup();
+		openPanel(container);
+		fireEvent.scroll(container.querySelector('.rdt_filterPanel') as HTMLElement);
+		expect(container.querySelector('.rdt_filterPanel')).not.toBeNull();
+	});
+
+	test('window resize closes the panel', () => {
+		const { container } = setup();
+		openPanel(container);
+		fireEvent(window, new Event('resize'));
 		expect(container.querySelector('.rdt_filterPanel')).toBeNull();
 	});
 });
@@ -242,5 +283,426 @@ describe('ColumnFilter:date filter type', () => {
 
 		const input = container.querySelector('input[aria-label="Filter value"]') as HTMLInputElement;
 		expect(input.type).toBe('date');
+	});
+});
+
+describe('ColumnFilter:datetime filter type', () => {
+	test('renders datetime-local inputs and the date operator set', () => {
+		const { container } = setup({ filterType: 'datetime', filterValue: emptyFilterState('datetime') });
+		openPanel(container);
+
+		const input = container.querySelector('input[aria-label="Filter value"]') as HTMLInputElement;
+		expect(input.type).toBe('datetime-local');
+
+		const opts = Array.from(container.querySelectorAll('select[aria-label="Filter operator"] option')).map(
+			o => o.textContent,
+		);
+		expect(opts).toEqual(['Equals', 'Before', 'After', 'Between', 'Blank', 'Not blank']);
+	});
+});
+
+describe('ColumnFilter:time filter type', () => {
+	test('renders a time input with seconds precision and the date operator set', () => {
+		const { container } = setup({ filterType: 'time', filterValue: emptyFilterState('time') });
+		openPanel(container);
+
+		const input = container.querySelector('input[aria-label="Filter value"]') as HTMLInputElement;
+		expect(input.type).toBe('time');
+		expect(input.step).toBe('1');
+
+		const opts = Array.from(container.querySelectorAll('select[aria-label="Filter operator"] option')).map(
+			o => o.textContent,
+		);
+		expect(opts).toEqual(['Equals', 'Before', 'After', 'Between', 'Blank', 'Not blank']);
+	});
+
+	test('between shows two time inputs', () => {
+		const { container } = setup({ filterType: 'time', filterValue: emptyFilterState('time') });
+		openPanel(container);
+		fireEvent.change(container.querySelector('select[aria-label="Filter operator"]') as HTMLSelectElement, {
+			target: { value: 'between' },
+		});
+		const inputs = container.querySelectorAll('input[type="time"]');
+		expect(inputs).toHaveLength(2);
+	});
+});
+
+describe('ColumnFilter:localization (options prop)', () => {
+	const options = {
+		filterColumnAriaLabel: 'test-filter-col',
+		filterActiveAriaLabel: 'test-filter-active',
+		filterPanelAriaLabel: 'test-filter-panel',
+		operatorAriaLabel: 'test-operator',
+		valuePlaceholder: 'test-placeholder',
+		valueAriaLabel: 'test-value',
+		value2AriaLabel: 'test-value2',
+		value2Placeholder: 'test-placeholder2',
+		betweenSeparatorText: 'test-sep',
+		removeConditionAriaLabel: 'test-remove',
+		addConditionAriaLabel: 'test-add',
+		addConditionLabel: 'test-add-label',
+		clearLabel: 'test-clear',
+		applyLabel: 'test-apply',
+		andLabel: 'test-and',
+		orLabel: 'test-or',
+		operators: { contains: 'test-contains', equals: 'test-equals' },
+	};
+
+	test('filter icon button uses custom aria-label', () => {
+		const { container } = setup({ options });
+		const btn = container.querySelector('button') as HTMLButtonElement;
+		expect(btn.getAttribute('aria-label')).toBe('test-filter-col');
+	});
+
+	test('active filter uses custom active aria-label', () => {
+		const { container } = setup({
+			options,
+			filterValue: { condition1: { operator: 'contains', value: 'x' } },
+		});
+		const btn = container.querySelector('button') as HTMLButtonElement;
+		expect(btn.getAttribute('aria-label')).toBe('test-filter-active');
+	});
+
+	function openPanelByClass(container: HTMLElement) {
+		const btn = container.querySelector('button.rdt_filterIcon') as HTMLElement;
+		fireEvent.click(btn);
+	}
+
+	test('panel uses custom aria-label', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('test-filter-panel');
+	});
+
+	test('operator select uses custom aria-label', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		expect(container.querySelector('select')?.getAttribute('aria-label')).toBe('test-operator');
+	});
+
+	test('value input uses custom placeholder and aria-label', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		const input = container.querySelector('input') as HTMLInputElement;
+		expect(input.getAttribute('aria-label')).toBe('test-value');
+		expect(input.placeholder).toBe('test-placeholder');
+	});
+
+	test('custom operator labels appear in select; untranslated keys fall back to default', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		const select = container.querySelector('select') as HTMLSelectElement;
+		const optionTexts = Array.from(select.options).map(o => o.text);
+		expect(optionTexts).toContain('test-contains');
+		expect(optionTexts).toContain('test-equals');
+		expect(optionTexts).toContain('Does not contain'); // untranslated key falls back to English default
+	});
+
+	test('Apply and Clear buttons use custom labels', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		const btns = Array.from(container.querySelectorAll('.rdt_filterActions button')).map(b => b.textContent);
+		expect(btns).toContain('test-clear');
+		expect(btns).toContain('test-apply');
+	});
+
+	test('add-condition button uses custom label and aria-label', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		const addBtn = container.querySelector('.rdt_filterAddCondition') as HTMLButtonElement;
+		expect(addBtn.textContent).toBe('test-add-label');
+		expect(addBtn.getAttribute('aria-label')).toBe('test-add');
+	});
+
+	test('AND / OR buttons use custom labels', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		fireEvent.click(container.querySelector('.rdt_filterAddCondition') as HTMLElement);
+		const logicBtns = Array.from(container.querySelectorAll('.rdt_filterLogicBtn')).map(b => b.textContent);
+		expect(logicBtns).toContain('test-and');
+		expect(logicBtns).toContain('test-or');
+	});
+
+	test('remove-condition button uses custom aria-label', () => {
+		const { container } = setup({ options });
+		openPanelByClass(container);
+		fireEvent.click(container.querySelector('.rdt_filterAddCondition') as HTMLElement);
+		const removeBtn = container.querySelector('.rdt_filterRemoveBtn') as HTMLButtonElement;
+		expect(removeBtn.getAttribute('aria-label')).toBe('test-remove');
+	});
+
+	test('between separator uses custom text', () => {
+		const { container } = setup({ options, filterType: 'number', filterValue: emptyFilterState('number') });
+		openPanelByClass(container);
+		const select = container.querySelector('select') as HTMLSelectElement;
+		fireEvent.change(select, { target: { value: 'between' } });
+		expect(container.querySelector('.rdt_filterBetweenSep')?.textContent).toBe('test-sep');
+	});
+
+	test('second value input uses custom aria-label and placeholder', () => {
+		const { container } = setup({ options, filterType: 'number', filterValue: emptyFilterState('number') });
+		openPanelByClass(container);
+		const select = container.querySelector('select') as HTMLSelectElement;
+		fireEvent.change(select, { target: { value: 'between' } });
+		const input2 = container.querySelector('input[aria-label="test-value2"]') as HTMLInputElement;
+		expect(input2).not.toBeNull();
+		expect(input2.placeholder).toBe('test-placeholder2');
+	});
+});
+
+describe('ColumnFilter:set filter', () => {
+	const values = ['Design', 'Engineering', 'Product', ''];
+
+	function setupSet(overrides: Partial<React.ComponentProps<typeof ColumnFilter>> = {}) {
+		return setup({
+			filterType: 'set',
+			filterValue: emptyFilterState('set'),
+			getDistinctValues: () => values,
+			...overrides,
+		});
+	}
+
+	function itemLabels(container: HTMLElement) {
+		return [...container.querySelectorAll('.rdt_filterSetList .rdt_filterSetItem > span:not(.rdt_Checkbox)')].map(
+			el => el.textContent,
+		);
+	}
+
+	test('renders a checkbox per distinct value instead of the operator UI', () => {
+		const { container } = setupSet();
+		openPanel(container);
+
+		expect(container.querySelector('.rdt_filterSelect')).toBeNull();
+		expect(container.querySelector('.rdt_filterAddCondition')).toBeNull();
+		expect(itemLabels(container)).toEqual(['(Select all)', 'Design', 'Engineering', 'Product', '(Blanks)']);
+	});
+
+	test('every value starts checked when no selection has been made', () => {
+		const { container } = setupSet();
+		openPanel(container);
+
+		const boxes = [...container.querySelectorAll<HTMLInputElement>('.rdt_filterSetItem input')];
+		expect(boxes.every(b => b.checked)).toBe(true);
+	});
+
+	test('unchecking a value applies the remaining values', () => {
+		const { container, onChange } = setupSet();
+		openPanel(container);
+
+		const design = container.querySelectorAll<HTMLInputElement>('.rdt_filterSetItem input')[1];
+		fireEvent.click(design);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLElement);
+
+		const applied = onChange.mock.calls[0][1] as FilterState;
+		expect(applied.values).toEqual(['Engineering', 'Product', '']);
+	});
+
+	test('select all clears every value when all are checked', () => {
+		const { container, onChange } = setupSet();
+		openPanel(container);
+
+		fireEvent.click(container.querySelector('.rdt_filterSetSelectAll input') as HTMLElement);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLElement);
+
+		expect((onChange.mock.calls[0][1] as FilterState).values).toEqual([]);
+	});
+
+	test('unchecking select-all while searching clears the whole selection', () => {
+		const { container, onChange } = setupSet();
+		openPanel(container);
+
+		fireEvent.change(container.querySelector('.rdt_filterSetSearch') as HTMLElement, {
+			target: { value: 'eng' },
+		});
+		expect(itemLabels(container)).toEqual(['(Select all)', 'Engineering']);
+
+		// Subtracting just the visible values would keep the ones the search is hiding.
+		fireEvent.click(container.querySelector('.rdt_filterSetSelectAll input') as HTMLElement);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLElement);
+
+		expect((onChange.mock.calls[0][1] as FilterState).values).toEqual([]);
+	});
+
+	test('search then select-all then check one value filters to only that value', () => {
+		const { container, onChange } = setupSet();
+		openPanel(container);
+
+		fireEvent.change(container.querySelector('.rdt_filterSetSearch') as HTMLElement, {
+			target: { value: 'eng' },
+		});
+		fireEvent.click(container.querySelector('.rdt_filterSetSelectAll input') as HTMLElement);
+		fireEvent.click(container.querySelectorAll('.rdt_filterSetItem input')[1] as HTMLElement);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLElement);
+
+		expect((onChange.mock.calls[0][1] as FilterState).values).toEqual(['Engineering']);
+	});
+
+	test('checking select-all while searching adds only the visible values', () => {
+		const { container, onChange } = setupSet();
+		openPanel(container);
+
+		// Clear everything first so the visible values are the only ones added back.
+		fireEvent.click(container.querySelector('.rdt_filterSetSelectAll input') as HTMLElement);
+		fireEvent.change(container.querySelector('.rdt_filterSetSearch') as HTMLElement, {
+			target: { value: 'eng' },
+		});
+		fireEvent.click(container.querySelector('.rdt_filterSetSelectAll input') as HTMLElement);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLElement);
+
+		expect((onChange.mock.calls[0][1] as FilterState).values).toEqual(['Engineering']);
+	});
+
+	test('select-all is indeterminate on a partial selection', () => {
+		const { container } = setupSet();
+		openPanel(container);
+
+		const selectAll = container.querySelector('.rdt_filterSetSelectAll input') as HTMLInputElement;
+		expect(selectAll.indeterminate).toBe(false);
+
+		fireEvent.click(container.querySelectorAll('.rdt_filterSetItem input')[1] as HTMLElement);
+		expect(selectAll.checked).toBe(false);
+		expect(selectAll.indeterminate).toBe(true);
+	});
+
+	test('applying a set filter saves the values in the checklist', () => {
+		const { container, onChange } = setupSet();
+		openPanel(container);
+
+		fireEvent.click(container.querySelectorAll('.rdt_filterSetItem input')[1] as HTMLElement);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLElement);
+
+		expect((onChange.mock.calls[0][1] as FilterState).knownValues).toEqual(values);
+	});
+
+	test('a value added after the filter was applied shows as checked', () => {
+		const { container } = setupSet({
+			filterValue: {
+				condition1: { operator: 'equals' },
+				values: ['Design'],
+				knownValues: ['Design', 'Engineering'],
+			},
+			getDistinctValues: () => ['Design', 'Engineering', 'Support'],
+		});
+		openPanel(container);
+
+		const boxes = Array.from(container.querySelectorAll('.rdt_filterSetItem input')) as HTMLInputElement[];
+		// Support was not in the checklist, so it stays checked.
+		expect(boxes.slice(1).map(b => b.checked)).toEqual([true, false, true]);
+	});
+
+	test('shows a message when the search matches nothing', () => {
+		const { container } = setupSet();
+		openPanel(container);
+
+		fireEvent.change(container.querySelector('.rdt_filterSetSearch') as HTMLElement, {
+			target: { value: 'zzz' },
+		});
+
+		expect(container.querySelector('.rdt_filterSetList')).toBeNull();
+		expect(container.querySelector('.rdt_filterSetEmpty')?.textContent).toBe('No matches');
+	});
+
+	test('the blanks entry is searchable by its label', () => {
+		const { container } = setupSet();
+		openPanel(container);
+
+		fireEvent.change(container.querySelector('.rdt_filterSetSearch') as HTMLElement, {
+			target: { value: 'blank' },
+		});
+
+		expect(itemLabels(container)).toEqual(['(Select all)', '(Blanks)']);
+	});
+
+	test('distinct values are re-read each time the panel opens', () => {
+		const getDistinctValues = vi.fn(() => values);
+		const { container } = setupSet({ getDistinctValues });
+
+		openPanel(container);
+		fireEvent.keyDown(document, { key: 'Escape' });
+		openPanel(container);
+
+		expect(getDistinctValues).toHaveBeenCalledTimes(2);
+	});
+
+	test('clearing resets to the pristine match-everything state', () => {
+		const { container, onChange } = setupSet({
+			filterValue: { ...emptyFilterState('set'), values: ['Design'] },
+		});
+		openPanel(container);
+
+		fireEvent.click(container.querySelector('.rdt_filterBtn') as HTMLElement);
+
+		expect((onChange.mock.calls[0][1] as FilterState).values).toBeUndefined();
+	});
+
+	test('select-all says it acts on the search results while a search narrows the list', () => {
+		const { container } = setupSet();
+		openPanel(container);
+
+		const selectAll = () => container.querySelector('.rdt_filterSetSelectAll input') as HTMLElement;
+		expect(selectAll().getAttribute('aria-label')).toBe('(Select all)');
+
+		fireEvent.change(container.querySelector('.rdt_filterSetSearch') as HTMLElement, {
+			target: { value: 'des' },
+		});
+
+		expect(selectAll().getAttribute('aria-label')).toBe('(Select all) search results');
+		// The visible text is unchanged; only the announced label narrows.
+		expect(container.querySelector('.rdt_filterSetSelectAll > span:not(.rdt_Checkbox)')?.textContent).toBe(
+			'(Select all)',
+		);
+	});
+});
+
+describe('ColumnFilter:reveal', () => {
+	test('the panel shares the popup chrome and is marked visible once positioned', () => {
+		const { container } = setup();
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLElement);
+
+		const panel = container.querySelector('.rdt_filterPanel') as HTMLElement;
+		expect(panel.classList.contains('rdt_popup')).toBe(true);
+		expect(panel.classList.contains('rdt_popupVisible')).toBe(true);
+		expect(panel.style.visibility).toBe('visible');
+	});
+});
+
+describe('ColumnFilter:dialog semantics', () => {
+	test('the filter button reports its popup, not a pressed state', () => {
+		const { container } = setup();
+		const btn = container.querySelector('.rdt_filterIcon') as HTMLElement;
+
+		expect(btn.getAttribute('aria-haspopup')).toBe('dialog');
+		expect(btn.getAttribute('aria-expanded')).toBe('false');
+		expect(btn.getAttribute('aria-pressed')).toBeNull();
+
+		fireEvent.click(btn);
+		expect(btn.getAttribute('aria-expanded')).toBe('true');
+	});
+
+	test('Tab from the last control wraps to the first instead of escaping the panel', () => {
+		const { container } = setup();
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLElement);
+
+		const panel = document.querySelector('.rdt_filterPanel') as HTMLElement;
+		const focusable = panel.querySelectorAll<HTMLElement>('select, input:not([disabled]), button:not([disabled])');
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+
+		last.focus();
+		fireEvent.keyDown(document, { key: 'Tab' });
+		expect(document.activeElement).toBe(first);
+	});
+
+	test('Shift+Tab from the first control wraps to the last', () => {
+		const { container } = setup();
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLElement);
+
+		const panel = document.querySelector('.rdt_filterPanel') as HTMLElement;
+		const focusable = panel.querySelectorAll<HTMLElement>('select, input:not([disabled]), button:not([disabled])');
+		const last = focusable[focusable.length - 1];
+
+		focusable[0].focus();
+		fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+		expect(document.activeElement).toBe(last);
 	});
 });

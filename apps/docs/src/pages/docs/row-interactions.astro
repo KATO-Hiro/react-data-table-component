@@ -2,6 +2,7 @@
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import Demo from '../../components/Demo.astro';
 import { RowClickDemo, RowLinkDemo, ActionCellDemo } from '../../components/demos/RowInteractionsDemo.tsx';
+import PropsTable from '../../components/PropsTable.astro';
 ---
 
 <DocsLayout title="Row interactions | react-data-table-component">
@@ -20,13 +21,17 @@ import { RowClickDemo, RowLinkDemo, ActionCellDemo } from '../../components/demo
 import DataTable, { type TableColumn } from 'react-data-table-component';
 
 interface Employee {
-  id: number; name: string; department: string; role: string; email: string;
+  id: number;
+  name: string;
+  department: string;
+  role: string;
+  email: string;
 }
 
 const columns: TableColumn<Employee>[] = [
-  { name: 'Name',       selector: r => r.name,       sortable: true },
+  { name: 'Name', selector: r => r.name, sortable: true },
   { name: 'Department', selector: r => r.department, sortable: true },
-  { name: 'Role',       selector: r => r.role },
+  { name: 'Role', selector: r => r.role },
 ];
 
 export default function App() {
@@ -34,15 +39,11 @@ export default function App() {
 
   return (
     <div>
-      <DataTable
-        columns={columns}
-        data={data}
-        pointerOnHover
-        highlightOnHover
-        onRowClicked={row => setSelected(row)}
-      />
+      <DataTable columns={columns} data={data} pointerOnHover highlightOnHover onRowClicked={row => setSelected(row)} />
       {selected && (
-        <div>{selected.name} — {selected.role}, {selected.department}</div>
+        <div>
+          {selected.name} — {selected.role}, {selected.department}
+        </div>
       )}
     </div>
   );
@@ -67,7 +68,7 @@ export default function App() {
 
   <p>
     Use <code>onRowMiddleClicked</code> to handle middle-click (scroll-click). Combined with
-    <code>onRowClicked</code>, you get full NavLink behaviour: left-click navigates in the same tab,
+    <code>onRowClicked</code>, you get full NavLink behavior: left-click navigates in the same tab,
     middle-click or Ctrl/⌘+click opens in a new tab.
   </p>
 
@@ -78,9 +79,9 @@ export default function App() {
 import { useNavigate } from 'react-router-dom'; // or your router
 
 const columns: TableColumn<Employee>[] = [
-  { name: 'Name',       selector: r => r.name },
+  { name: 'Name', selector: r => r.name },
   { name: 'Department', selector: r => r.department },
-  { name: 'Role',       selector: r => r.role },
+  { name: 'Role', selector: r => r.role },
   {
     name: 'Email',
     ignoreRowClick: true,
@@ -108,7 +109,7 @@ export default function App() {
           navigate(\`/employees/\${row.id}\`);
         }
       }}
-      onRowMiddleClicked={(row) => {
+      onRowMiddleClicked={row => {
         window.open(\`/employees/\${row.id}\`, '_blank');
       }}
     />
@@ -133,9 +134,9 @@ export default function App() {
     code={`import DataTable, { type TableColumn } from 'react-data-table-component';
 
 const columns: TableColumn<Employee>[] = [
-  { name: 'Name',       selector: r => r.name,       sortable: true },
+  { name: 'Name', selector: r => r.name, sortable: true },
   { name: 'Department', selector: r => r.department, sortable: true },
-  { name: 'Role',       selector: r => r.role },
+  { name: 'Role', selector: r => r.role },
   {
     name: 'Actions',
     button: true,
@@ -162,4 +163,8 @@ export default function App() {
   >
     <ActionCellDemo client:load />
   </Demo>
+
+  <h2>Prop reference</h2>
+
+  <PropsTable feature="row-events" columns={['prop', 'type', 'description']} />
 </DocsLayout>

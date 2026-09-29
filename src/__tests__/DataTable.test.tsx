@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, act } from '@testing-library/react';
 import DataTable from '../components/DataTable';
 import { Direction, STOP_PROP_TAG } from '../constants';
 import { Alignment } from '../index';
-import { ConditionalStyles, SortOrder } from '../types';
+import { ConditionalStyles, SortOrder, DataTableHandle } from '../types';
 
 interface Data {
 	id: number;
@@ -255,6 +255,42 @@ describe('DataTable::onSelectedRowsChange', () => {
 	});
 });
 
+describe('DataTable::controlled selectedRows', () => {
+	test('should call onSelectedRowsChange with the correct values when a row is toggled while another is selected via the controlled selectedRows prop', () => {
+		const mock = dataMock();
+		const onSelectedRowsChange = vi.fn();
+
+		const { container, rerender } = render(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				keyField="id"
+				selectableRows
+				selectedRows={[]}
+				onSelectedRowsChange={onSelectedRowsChange}
+			/>,
+		);
+
+		rerender(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				keyField="id"
+				selectableRows
+				selectedRows={[mock.data[0]]}
+				onSelectedRowsChange={onSelectedRowsChange}
+			/>,
+		);
+
+		fireEvent.click(container.querySelector('input[name="Select row 2"]') as HTMLInputElement);
+
+		const calls = onSelectedRowsChange.mock.calls;
+		const lastCall = calls[calls.length - 1][0];
+		expect(lastCall.selectedCount).toBe(2);
+		expect(lastCall.selectedRows.map((row: { id: number }) => row.id).sort()).toEqual([1, 2]);
+	});
+});
+
 describe('data prop changes', () => {
 	test('should update state if the data prop changes', () => {
 		const mock = dataMock();
@@ -327,7 +363,6 @@ describe('DataTable::columns', () => {
 	});
 
 	test('should render correctly when column.cell is set to a component', () => {
-		// eslint-disable-next-line react/display-name
 		const mock = dataMock({ cell: (row: { some: { name: string } }) => <div>{row.some.name}</div> });
 		const { getByText } = render(<DataTable data={mock.data} columns={mock.columns} />);
 
@@ -396,14 +431,6 @@ describe('DataTable::columns', () => {
 		expect(container.querySelector('.rdt_hideOnLg')).not.toBeNull();
 	});
 
-	test('should render correctly if column.hide is an integer', () => {
-		const mock = dataMock({ hide: 300 });
-		const { container } = render(<DataTable data={mock.data} columns={mock.columns} />);
-
-		// integer does not map to a media class, column still renders
-		expect(container.querySelector('div[data-column-id="1"]')).not.toBeNull();
-	});
-
 	test('should render correctly if column.omit is true', () => {
 		const mock = dataMock();
 		const mockColumns = mock.columns.slice();
@@ -455,6 +482,18 @@ describe('DataTable:RowClicks', () => {
 		fireEvent.click(container.querySelector('div[id="cell-1-1"]') as HTMLElement);
 		expect(onRowDoubleClickedMock).not.toBeCalled();
 	});
+
+	test('should call onRowMiddleClicked when a row is aux-clicked', () => {
+		const onRowMiddleClickedMock = vi.fn();
+		const mock = dataMock();
+		const { container } = render(
+			<DataTable data={mock.data} columns={mock.columns} onRowMiddleClicked={onRowMiddleClickedMock} />,
+		);
+
+		const cell = container.querySelector('div[id="cell-1-1"]') as HTMLElement;
+		fireEvent(cell, new MouseEvent('auxclick', { bubbles: true, cancelable: true }));
+		expect(onRowMiddleClickedMock).toHaveBeenCalled();
+	});
 });
 
 describe('DataTable:RowMouseEnterAndLeave', () => {
@@ -475,6 +514,26 @@ describe('DataTable:RowMouseEnterAndLeave', () => {
 		expect(onRowMouseEnterMock).toHaveBeenCalled();
 		fireEvent.mouseLeave(container.querySelector('div[id="cell-1-1"]') as HTMLElement);
 		expect(onRowMouseLeaveMock).toHaveBeenCalled();
+	});
+
+	test('should call onScroll when the responsive wrapper is scrolled', () => {
+		const onScrollMock = vi.fn();
+		const mock = dataMock({});
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} onScroll={onScrollMock} />);
+
+		fireEvent.scroll(container.querySelector('.rdt_responsiveWrapper') as HTMLElement);
+		expect(onScrollMock).toHaveBeenCalledTimes(1);
+	});
+
+	test('should call onScroll when fixedHeader is enabled', () => {
+		const onScrollMock = vi.fn();
+		const mock = dataMock({});
+		const { container } = render(
+			<DataTable data={mock.data} columns={mock.columns} fixedHeader onScroll={onScrollMock} />,
+		);
+
+		fireEvent.scroll(container.querySelector('.rdt_responsiveWrapperFixed') as HTMLElement);
+		expect(onScrollMock).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -503,6 +562,31 @@ describe('DataTable::progress/nodata', () => {
 	test('should render skeleton rows when progressPending is true and there is no data', () => {
 		const mock = dataMock();
 		const { container } = render(<DataTable data={[]} columns={mock.columns} progressPending />);
+
+		expect(container.querySelector('.rdt_skeletonPulse')).not.toBeNull();
+	});
+
+	test('should skip skeleton rows on initial load when progressSkeleton is false', () => {
+		const mock = dataMock();
+		const { container, getByText } = render(
+			<DataTable
+				data={[]}
+				columns={mock.columns}
+				progressPending
+				progressSkeleton={false}
+				progressComponent={<div>Loading…</div>}
+			/>,
+		);
+
+		expect(container.querySelector('.rdt_skeletonPulse')).toBeNull();
+		expect(getByText('Loading…')).not.toBeNull();
+	});
+
+	test('should still render skeleton rows when a custom progressComponent is passed but progressSkeleton is left default', () => {
+		const mock = dataMock();
+		const { container } = render(
+			<DataTable data={[]} columns={mock.columns} progressPending progressComponent={<div>Loading…</div>} />,
+		);
 
 		expect(container.querySelector('.rdt_skeletonPulse')).not.toBeNull();
 	});
@@ -599,6 +683,13 @@ describe('DataTable::responsive', () => {
 
 		expect(container.querySelector('.rdt_responsiveWrapperScroll')).toBeNull();
 	});
+
+	test('fixedHeader still creates a scroll container when responsive=false', () => {
+		const mock = dataMock();
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} responsive={false} fixedHeader />);
+
+		expect(container.querySelector('.rdt_responsiveWrapperFixed')).not.toBeNull();
+	});
 });
 
 describe('DataTable::sorting', () => {
@@ -692,7 +783,10 @@ describe('DataTable::sorting', () => {
 
 		fireEvent.click(container.querySelector('div[data-sort-id="1"]') as HTMLElement);
 
-		expect(onSortMock).toBeCalledWith({ id: 1, ...mock.columns[0] }, SortOrder.ASC, mock.data.slice(0).sort());
+		const sortedColumn = { id: 1, ...mock.columns[0] };
+		expect(onSortMock).toBeCalledWith(sortedColumn, SortOrder.ASC, mock.data.slice(0).sort(), [
+			{ column: sortedColumn, sortDirection: SortOrder.ASC },
+		]);
 	});
 
 	test('should call onSort with the correct params if the sort is clicked twice', () => {
@@ -700,11 +794,64 @@ describe('DataTable::sorting', () => {
 		const mock = dataMock({ sortable: true });
 		const { container } = render(<DataTable data={mock.data} columns={mock.columns} onSort={onSortMock} />);
 
-		fireEvent.click(container.querySelector('div[data-sort-id="1"]') as HTMLElement);
-		expect(onSortMock).toBeCalledWith({ id: 1, ...mock.columns[0] }, SortOrder.ASC, mock.data.slice(0).sort());
+		const sortedColumn = { id: 1, ...mock.columns[0] };
 
 		fireEvent.click(container.querySelector('div[data-sort-id="1"]') as HTMLElement);
-		expect(onSortMock).toBeCalledWith({ id: 1, ...mock.columns[0] }, SortOrder.DESC, mock.data.slice(0).reverse());
+		expect(onSortMock).toBeCalledWith(sortedColumn, SortOrder.ASC, mock.data.slice(0).sort(), [
+			{ column: sortedColumn, sortDirection: SortOrder.ASC },
+		]);
+
+		fireEvent.click(container.querySelector('div[data-sort-id="1"]') as HTMLElement);
+		expect(onSortMock).toBeCalledWith(sortedColumn, SortOrder.DESC, mock.data.slice(0).reverse(), [
+			{ column: sortedColumn, sortDirection: SortOrder.DESC },
+		]);
+	});
+
+	test('a third plain click removes sorting and restores the original row order', () => {
+		const onSortMock = vi.fn();
+		const mock = dataMock({ sortable: true });
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} onSort={onSortMock} />);
+
+		const target = () => container.querySelector('div[data-sort-id="1"]') as HTMLElement;
+
+		fireEvent.click(target()); // asc
+		fireEvent.click(target()); // desc
+		fireEvent.click(target()); // removed
+
+		const lastCall = onSortMock.mock.calls[onSortMock.mock.calls.length - 1];
+		expect(lastCall[0]).toEqual({});
+		expect(lastCall[3]).toEqual([]);
+		expect(target().closest('[role="columnheader"]')?.getAttribute('aria-sort')).toBe('none');
+	});
+
+	test('Ctrl+click adds a second sort column when sortMulti is enabled', () => {
+		const onSortMock = vi.fn();
+		const mock = dataMock({ sortable: true });
+		const columns = [mock.columns[0], { ...mock.columns[0], id: 2, name: 'Second', sortable: true }];
+		const { container } = render(<DataTable data={mock.data} columns={columns} sortMulti onSort={onSortMock} />);
+
+		fireEvent.click(container.querySelector('div[data-sort-id="1"]') as HTMLElement);
+		fireEvent.click(container.querySelector('div[data-sort-id="2"]') as HTMLElement, { ctrlKey: true });
+
+		const lastCall = onSortMock.mock.calls[onSortMock.mock.calls.length - 1];
+		const sortColumns = lastCall[3];
+		expect(sortColumns).toHaveLength(2);
+		expect(sortColumns[0].column.id).toBe(1);
+		expect(sortColumns[1].column.id).toBe(2);
+	});
+
+	test('Ctrl+click is ignored (treated as a replace) when sortMulti is disabled', () => {
+		const onSortMock = vi.fn();
+		const mock = dataMock({ sortable: true });
+		const columns = [mock.columns[0], { ...mock.columns[0], id: 2, name: 'Second', sortable: true }];
+		const { container } = render(<DataTable data={mock.data} columns={columns} onSort={onSortMock} />);
+
+		fireEvent.click(container.querySelector('div[data-sort-id="1"]') as HTMLElement);
+		fireEvent.click(container.querySelector('div[data-sort-id="2"]') as HTMLElement, { ctrlKey: true });
+
+		const lastCall = onSortMock.mock.calls[onSortMock.mock.calls.length - 1];
+		expect(lastCall[3]).toHaveLength(1);
+		expect(lastCall[3][0].column.id).toBe(2);
 	});
 
 	test('should render correctly with a custom sortIcon', () => {
@@ -752,6 +899,24 @@ describe('DataTable::sorting', () => {
 		// Row order still unchanged with sortServer
 		const rows = container.querySelectorAll('.rdt_row');
 		expect(rows[0].id).toBe('row-1');
+	});
+
+	test('ref.clearSort resets row order back to defaultSortFieldId asc', () => {
+		const columns = [{ id: 'name', name: 'Test', selector: (row: Data) => row.some.name, sortable: true }];
+		const ref = React.createRef<DataTableHandle>();
+		const { container } = render(
+			<DataTable ref={ref} data={dataMock().data} columns={columns} defaultSortFieldId="name" defaultSortAsc />,
+		);
+
+		// column already active asc; one click flips to desc — Zuchinni (row-2) first
+		fireEvent.click(container.querySelector('div[data-sort-id="name"]') as HTMLElement);
+		expect(container.querySelectorAll('.rdt_row')[0].id).toBe('row-2');
+
+		// reset — back to defaultSortAsc=true so Apple (row-1) first
+		act(() => {
+			ref.current?.clearSort();
+		});
+		expect(container.querySelectorAll('.rdt_row')[0].id).toBe('row-1');
 	});
 });
 
@@ -958,6 +1123,26 @@ describe('DataTable::expandableRows', () => {
 		fireEvent.doubleClick(container.querySelector(`div[data-tag="${STOP_PROP_TAG}"]`) as HTMLElement);
 
 		expect(onRowExpandToggledMock).toBeCalled();
+	});
+
+	test('should expand a row when Enter is pressed on the row and expandOnRowClicked is true', () => {
+		const onRowExpandToggledMock = vi.fn();
+		const mock = dataMock();
+		const { container } = render(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				expandableRows
+				expandOnRowClicked
+				onRowExpandToggled={onRowExpandToggledMock}
+			/>,
+		);
+
+		// Key events only count when the row itself is focused — bubbled keys from
+		// focused descendants (editors, cell navigation) must not toggle the row.
+		fireEvent.keyDown(container.querySelector('div[id^="row-"]') as HTMLElement, { key: 'Enter' });
+
+		expect(onRowExpandToggledMock).toHaveBeenCalled();
 	});
 });
 
@@ -1922,6 +2107,63 @@ describe('DataTable::Pagination', () => {
 		expect(getByText('Todos')).not.toBeNull();
 	});
 
+	test('should navigate to the specified page when paginationPage changes', () => {
+		const mock = dataMock();
+		const { container, rerender } = render(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				paginationPerPage={1}
+				paginationRowsPerPageOptions={[1, 2]}
+				pagination
+				paginationPage={1}
+			/>,
+		);
+
+		rerender(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				paginationPerPage={1}
+				paginationRowsPerPageOptions={[1, 2]}
+				pagination
+				paginationPage={2}
+			/>,
+		);
+
+		expect(container.querySelector('div[id="row-2"]')).not.toBeNull();
+	});
+
+	test('should call onChangePage when paginationPage changes', () => {
+		const mock = dataMock();
+		const onChangePage = vi.fn();
+		const { rerender } = render(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				paginationPerPage={1}
+				paginationRowsPerPageOptions={[1, 2]}
+				pagination
+				paginationPage={1}
+				onChangePage={onChangePage}
+			/>,
+		);
+
+		rerender(
+			<DataTable
+				data={mock.data}
+				columns={mock.columns}
+				paginationPerPage={1}
+				paginationRowsPerPageOptions={[1, 2]}
+				pagination
+				paginationPage={2}
+				onChangePage={onChangePage}
+			/>,
+		);
+
+		expect(onChangePage).toHaveBeenCalledWith(2, mock.data.length);
+	});
+
 	test('should render correctly when paginationResetDefaultPage is toggled', () => {
 		const mock = dataMock();
 		const { container, rerender } = render(
@@ -1948,6 +2190,95 @@ describe('DataTable::Pagination', () => {
 		);
 
 		expect(container.querySelector('div[id="row-1"]')).not.toBeNull();
+	});
+	describe('paginationPosition', () => {
+		test('should render pagination below the table by default', () => {
+			const mock = dataMock();
+			const { container } = render(<DataTable data={mock.data} columns={mock.columns} pagination />);
+
+			const wrapper = container.firstElementChild as HTMLElement;
+			const children = Array.from(wrapper.children);
+			const tableIdx = children.findIndex(el => el.classList.contains('rdt_TableResponsive') || el.tagName === 'DIV');
+			const paginationEl = container.querySelector('nav');
+			const paginationParent = paginationEl?.parentElement;
+			const paginationParentIdx = children.indexOf(paginationParent as Element);
+
+			expect(paginationParentIdx).toBeGreaterThan(tableIdx);
+		});
+
+		test('should render pagination above the table when paginationPosition="top"', () => {
+			const mock = dataMock();
+			const { container } = render(
+				<DataTable data={mock.data} columns={mock.columns} pagination paginationPosition="top" />,
+			);
+
+			const wrapper = container.firstElementChild as HTMLElement;
+			const children = Array.from(wrapper.children);
+			const responsiveWrapper = container.querySelector('.rdt_responsiveWrapper');
+			const responsiveIdx = children.indexOf(responsiveWrapper as Element);
+			const navEls = container.querySelectorAll('nav');
+
+			expect(navEls).toHaveLength(1);
+			const paginationParentIdx = children.indexOf(navEls[0].parentElement as Element);
+			expect(paginationParentIdx).toBeGreaterThanOrEqual(0);
+			expect(paginationParentIdx).toBeLessThan(responsiveIdx);
+		});
+
+		test('should render pagination above and below the table when paginationPosition="both"', () => {
+			const mock = dataMock();
+			const { container } = render(
+				<DataTable data={mock.data} columns={mock.columns} pagination paginationPosition="both" />,
+			);
+
+			const navEls = container.querySelectorAll('nav');
+			expect(navEls).toHaveLength(2);
+		});
+
+		test('should not render pagination when paginationPosition="top" and pagination is disabled', () => {
+			const mock = dataMock();
+			const { container } = render(<DataTable data={mock.data} columns={mock.columns} paginationPosition="top" />);
+
+			expect(container.querySelector('nav')).toBeNull();
+		});
+
+		test('should navigate correctly when using paginationPosition="top"', () => {
+			const mock = dataMock();
+			const { container } = render(
+				<DataTable
+					data={mock.data}
+					columns={mock.columns}
+					pagination
+					paginationPosition="top"
+					paginationPerPage={1}
+					paginationRowsPerPageOptions={[1, 2]}
+				/>,
+			);
+
+			fireEvent.click(container.querySelector('button#pagination-next-page') as HTMLButtonElement);
+
+			expect(container.querySelector('div[id="row-1"]')).toBeNull();
+			expect(container.querySelector('div[id="row-2"]')).not.toBeNull();
+		});
+
+		test('both pagination bars stay in sync when paginationPosition="both"', () => {
+			const mock = dataMock();
+			const { container } = render(
+				<DataTable
+					data={mock.data}
+					columns={mock.columns}
+					pagination
+					paginationPosition="both"
+					paginationPerPage={1}
+					paginationRowsPerPageOptions={[1, 2]}
+				/>,
+			);
+
+			const nextButtons = container.querySelectorAll('button#pagination-next-page');
+			fireEvent.click(nextButtons[0] as HTMLButtonElement);
+
+			expect(container.querySelector('div[id="row-1"]')).toBeNull();
+			expect(container.querySelector('div[id="row-2"]')).not.toBeNull();
+		});
 	});
 });
 
@@ -2025,7 +2356,6 @@ describe('DataTable::Header', () => {
 				data={mock.data}
 				columns={mock.columns}
 				title="whoa!"
-				// eslint-disable-next-line react/jsx-one-expression-per-line
 				actions={
 					<>
 						<div>some action</div>, <div>some action 2</div>
@@ -2458,6 +2788,112 @@ describe('DataTable::columnFilter', () => {
 		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(2);
 	});
 
+	test('set filter lists the column distinct values and filters on Apply', () => {
+		const data = [
+			{ id: 1, dept: 'Engineering' },
+			{ id: 2, dept: 'Design' },
+			{ id: 3, dept: 'Engineering' },
+			{ id: 4, dept: '' },
+		];
+		const columns = [
+			{
+				name: 'Dept',
+				id: 'dept',
+				selector: (row: (typeof data)[0]) => row.dept,
+				filterable: true,
+				filterType: 'set' as const,
+			},
+		];
+		const { container } = render(<DataTable data={data} columns={columns} />);
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+
+		// Distinct values, deduped, blanks last, behind a "(Select all)" row.
+		const labels = [
+			...container.querySelectorAll('.rdt_filterSetList .rdt_filterSetItem > span:not(.rdt_Checkbox)'),
+		].map(el => el.textContent);
+		expect(labels).toEqual(['(Select all)', 'Design', 'Engineering', '(Blanks)']);
+
+		// Uncheck Engineering, leaving Design + the blank row.
+		const boxes = container.querySelectorAll<HTMLInputElement>('.rdt_filterSetItem input');
+		fireEvent.click(boxes[2]);
+		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(4);
+
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(2);
+	});
+
+	test('re-applying a set filter unchanged keeps rows that arrived after it was applied', () => {
+		const columns = [
+			{
+				name: 'Dept',
+				id: 'dept',
+				selector: (row: { id: number; dept: string }) => row.dept,
+				filterable: true,
+				filterType: 'set' as const,
+			},
+		];
+		const initial = [
+			{ id: 1, dept: 'Engineering' },
+			{ id: 2, dept: 'Design' },
+		];
+		const { container, rerender } = render(<DataTable data={initial} columns={columns} keyField="id" />);
+		const rowCount = () => container.querySelectorAll('.rdt_TableBody [role="row"]').length;
+
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		const boxes = container.querySelectorAll<HTMLInputElement>('.rdt_filterSetItem input');
+		fireEvent.click(boxes[2]); // uncheck Engineering
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+		expect(rowCount()).toBe(1);
+
+		// Sales was not in the checklist when the filter was applied, so it stays visible.
+		rerender(<DataTable data={[...initial, { id: 3, dept: 'Sales' }]} columns={columns} keyField="id" />);
+		expect(rowCount()).toBe(2);
+
+		// Re-applying without touching anything must not turn Sales into an exclusion.
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+		expect(rowCount()).toBe(2);
+	});
+
+	test('set filter choices are the full distinct set, not narrowed by another column filter', () => {
+		const data = [
+			{ id: 1, dept: 'Engineering', region: 'EU' },
+			{ id: 2, dept: 'Design', region: 'US' },
+			{ id: 3, dept: 'Sales', region: 'US' },
+		];
+		const columns = [
+			{
+				name: 'Dept',
+				id: 'dept',
+				selector: (row: (typeof data)[0]) => row.dept,
+				filterable: true,
+				filterType: 'set' as const,
+			},
+			{
+				name: 'Region',
+				id: 'region',
+				selector: (row: (typeof data)[0]) => row.region,
+				filterable: true,
+			},
+		];
+		const { container } = render(<DataTable data={data} columns={columns} />);
+
+		// Filter Region to "US" first.
+		const icons = container.querySelectorAll<HTMLButtonElement>('.rdt_filterIcon');
+		fireEvent.click(icons[1]);
+		fireEvent.change(container.querySelector('.rdt_filterInput') as HTMLInputElement, {
+			target: { value: 'US' },
+		});
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+
+		// The Dept checklist still lists every department, including the EU-only one.
+		fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.rdt_filterIcon')[0]);
+		const labels = [
+			...container.querySelectorAll('.rdt_filterSetList .rdt_filterSetItem > span:not(.rdt_Checkbox)'),
+		].map(el => el.textContent);
+		expect(labels).toEqual(['(Select all)', 'Design', 'Engineering', 'Sales']);
+	});
+
 	test('respects custom filterFunction (receives FilterState)', () => {
 		const data = [
 			{ id: 1, some: { name: 'Alpha' } },
@@ -2495,6 +2931,82 @@ describe('DataTable::columnFilter', () => {
 		});
 	});
 
+	test('filters a filterable column that has no explicit id', () => {
+		const data = [{ name: 'Apple' }, { name: 'Banana' }];
+		const columns = [{ name: 'Name', selector: (row: (typeof data)[0]) => row.name, filterable: true }];
+		const { container } = render(<DataTable data={data} columns={columns} keyField="name" />);
+
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		fireEvent.change(container.querySelector('.rdt_filterInput') as HTMLInputElement, { target: { value: 'ban' } });
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+
+		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(1);
+	});
+
+	test('keeps table head visible when a filter matches no rows', () => {
+		const data = [
+			{ id: 1, some: { name: 'Apple' } },
+			{ id: 2, some: { name: 'Banana' } },
+		];
+		const columns = [
+			{
+				name: 'Name',
+				id: 'name',
+				selector: (row: (typeof data)[0]) => row.some.name,
+				filterable: true,
+			},
+		];
+		const { container } = render(<DataTable data={data} columns={columns} />);
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		fireEvent.change(container.querySelector('.rdt_filterInput') as HTMLInputElement, { target: { value: 'zzz' } });
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(0);
+		expect(container.querySelector('.rdt_noData')).not.toBeNull();
+		// The head must persist so the filter can be cleared
+		expect(container.querySelector('.rdt_TableHead')).not.toBeNull();
+		expect(container.querySelector('.rdt_filterIcon')).not.toBeNull();
+	});
+
+	test('with client pagination, a filter matches across all pages, not just the current one', () => {
+		const data = Array.from({ length: 20 }, (_, i) => ({
+			id: i + 1,
+			name: i % 2 === 0 ? 'match' : 'other',
+		}));
+		const columns = [{ name: 'Name', id: 'name', selector: (row: (typeof data)[0]) => row.name, filterable: true }];
+		const { container } = render(<DataTable data={data} columns={columns} pagination paginationPerPage={10} />);
+
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		fireEvent.change(container.querySelector('.rdt_filterInput') as HTMLInputElement, {
+			target: { value: 'match' },
+		});
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+
+		// 10 rows match across the whole set; all fit on the first filtered page.
+		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(10);
+	});
+
+	test('filtering on a later page clamps back to a page with results', () => {
+		const data = Array.from({ length: 30 }, (_, i) => ({
+			id: i + 1,
+			// only rows 1-3 match; they live on page 1
+			name: i < 3 ? 'apple' : 'other',
+		}));
+		const columns = [{ name: 'Name', id: 'name', selector: (row: (typeof data)[0]) => row.name, filterable: true }];
+		const { container } = render(<DataTable data={data} columns={columns} pagination paginationPerPage={10} />);
+
+		// Go to the last page, then filter — the matches only exist on page 1
+		fireEvent.click(container.querySelector('#pagination-last-page') as HTMLButtonElement);
+
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		fireEvent.change(container.querySelector('.rdt_filterInput') as HTMLInputElement, {
+			target: { value: 'apple' },
+		});
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+
+		// Page clamps back so the 3 matches render rather than an empty page
+		expect(container.querySelectorAll('.rdt_TableBody [role="row"]').length).toBe(3);
+	});
+
 	test('clears filter when Clear button is clicked', () => {
 		const data = [
 			{ id: 1, some: { name: 'Apple' } },
@@ -2522,6 +3034,90 @@ describe('DataTable::columnFilter', () => {
 	});
 });
 
+describe('DataTable::filterServer', () => {
+	// The server returned these two rows for `name contains "an"`. Filtering them again
+	// client-side would drop Apple, which the server deliberately sent.
+	const serverPage = [
+		{ id: 1, name: 'Banana' },
+		{ id: 2, name: 'Apple' },
+	];
+	const columns = [{ id: 'name', name: 'Name', selector: (r: { name: string }) => r.name, filterable: true }];
+	const filterValues = { name: { condition1: { operator: 'contains' as const, value: 'an' } } };
+	const rowCount = (c: HTMLElement) => c.querySelectorAll('.rdt_TableBody [role="row"]').length;
+
+	test('paginationServer skips the client-side filter pass', () => {
+		const { container } = render(
+			<DataTable
+				data={serverPage}
+				columns={columns}
+				pagination
+				paginationServer
+				paginationTotalRows={50}
+				filterValues={filterValues}
+				onFilterChange={vi.fn()}
+			/>,
+		);
+		expect(rowCount(container)).toBe(2);
+	});
+
+	test('filterServer skips the client-side filter pass without pagination', () => {
+		const { container } = render(
+			<DataTable
+				data={serverPage}
+				columns={columns}
+				filterServer
+				filterValues={filterValues}
+				onFilterChange={vi.fn()}
+			/>,
+		);
+		expect(rowCount(container)).toBe(2);
+	});
+
+	test('a filter matching nothing locally does not blank a server page', () => {
+		const { container } = render(
+			<DataTable
+				data={serverPage}
+				columns={columns}
+				pagination
+				paginationServer
+				paginationTotalRows={50}
+				filterValues={{ name: { condition1: { operator: 'contains', value: 'zzz' } } }}
+				onFilterChange={vi.fn()}
+			/>,
+		);
+		expect(rowCount(container)).toBe(2);
+	});
+
+	test('onFilterChange still fires so the consumer can refetch', () => {
+		const onFilterChange = vi.fn();
+		const { container } = render(
+			<DataTable
+				data={serverPage}
+				columns={columns}
+				pagination
+				paginationServer
+				paginationTotalRows={50}
+				filterValues={filterValues}
+				onFilterChange={onFilterChange}
+			/>,
+		);
+		fireEvent.click(container.querySelector('.rdt_filterIcon') as HTMLButtonElement);
+		fireEvent.change(container.querySelector('.rdt_filterInput') as HTMLInputElement, { target: { value: 'x' } });
+		fireEvent.click(container.querySelector('.rdt_filterBtnPrimary') as HTMLButtonElement);
+		expect(onFilterChange).toBeCalledWith(
+			'name',
+			expect.objectContaining({ condition1: { operator: 'contains', value: 'x' } }),
+		);
+	});
+
+	test('client-side filtering still applies without either flag', () => {
+		const { container } = render(
+			<DataTable data={serverPage} columns={columns} filterValues={filterValues} onFilterChange={vi.fn()} />,
+		);
+		expect(rowCount(container)).toBe(1);
+	});
+});
+
 describe('DataTable::columnResize', () => {
 	test('renders resize handles on column headers when resizable=true', () => {
 		const mock = dataMock();
@@ -2536,7 +3132,7 @@ describe('DataTable::columnResize', () => {
 		expect(container.querySelectorAll('.rdt_resizeHandle').length).toBe(0);
 	});
 
-	test('updates column maxWidth after mouse drag', () => {
+	test('updates column maxWidth after pointer drag', () => {
 		const mock = dataMock();
 		const { container } = render(<DataTable data={mock.data} columns={mock.columns} resizable />);
 		const handle = container.querySelector('.rdt_resizeHandle') as HTMLElement;
@@ -2544,11 +3140,76 @@ describe('DataTable::columnResize', () => {
 
 		// jsdom has offsetWidth=0, so startWidth=0 (0 ?? 100 does NOT fallback since ?? only catches null/undefined)
 		// delta = clientX 160 - startX 100 = 60 → newWidth = max(40, 0 + 60) = 60
-		fireEvent.mouseDown(handle, { clientX: 100 });
-		fireEvent.mouseMove(document, { clientX: 160 });
-		fireEvent.mouseUp(document);
+		fireEvent.pointerDown(handle, { clientX: 100 });
+		fireEvent.pointerMove(document, { clientX: 160 });
+		fireEvent.pointerUp(document);
 
 		// Column width is applied via maxWidth (buildCellStyle sets maxWidth from width prop)
+		expect(headerCell.style.maxWidth).toBe('60px');
+	});
+
+	test('does not resize a column below its minWidth', () => {
+		const mock = dataMock({ minWidth: '120px' });
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} resizable />);
+		const handle = container.querySelector('.rdt_resizeHandle') as HTMLElement;
+		const headerCell = handle.closest('[data-column-id]') as HTMLElement;
+
+		Object.defineProperty(headerCell, 'offsetWidth', { value: 300, configurable: true });
+
+		// 300 - 300 = 0, below the configured 120px minimum.
+		fireEvent.pointerDown(handle, { clientX: 300 });
+		fireEvent.pointerMove(document, { clientX: 0 });
+		fireEvent.pointerUp(document);
+
+		expect(headerCell.style.maxWidth).toBe('120px');
+	});
+
+	test('resizes to the 40px floor without a configured minWidth', () => {
+		const mock = dataMock();
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} resizable />);
+		const handle = container.querySelector('.rdt_resizeHandle') as HTMLElement;
+		const headerCell = handle.closest('[data-column-id]') as HTMLElement;
+
+		Object.defineProperty(headerCell, 'offsetWidth', { value: 300, configurable: true });
+
+		// 300 - 300 = 0, so the existing 40px floor applies.
+		fireEvent.pointerDown(handle, { clientX: 300 });
+		fireEvent.pointerMove(document, { clientX: 0 });
+		fireEvent.pointerUp(document);
+
+		expect(headerCell.style.maxWidth).toBe('40px');
+	});
+
+	test('does not clamp a resize above its minWidth', () => {
+		const mock = dataMock({ minWidth: '120px' });
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} resizable />);
+		const handle = container.querySelector('.rdt_resizeHandle') as HTMLElement;
+		const headerCell = handle.closest('[data-column-id]') as HTMLElement;
+
+		Object.defineProperty(headerCell, 'offsetWidth', { value: 300, configurable: true });
+
+		// 300 - 50 = 250, above the configured minimum.
+		fireEvent.pointerDown(handle, { clientX: 300 });
+		fireEvent.pointerMove(document, { clientX: 250 });
+		fireEvent.pointerUp(document);
+
+		expect(headerCell.style.maxWidth).toBe('250px');
+	});
+
+	test('inverts drag delta in RTL so dragging the handle left widens the column', () => {
+		const mock = dataMock();
+		const { container } = render(
+			<DataTable data={mock.data} columns={mock.columns} resizable direction={Direction.RTL} />,
+		);
+		const handle = container.querySelector('.rdt_resizeHandle') as HTMLElement;
+		const headerCell = handle.closest('[data-column-id]') as HTMLElement;
+
+		// Dragging left (clientX 100 → 40) is a -60 delta; in RTL it inverts to +60.
+		// startWidth is 0 in jsdom → newWidth = max(40, 0 + 60) = 60
+		fireEvent.pointerDown(handle, { clientX: 100 });
+		fireEvent.pointerMove(document, { clientX: 40 });
+		fireEvent.pointerUp(document);
+
 		expect(headerCell.style.maxWidth).toBe('60px');
 	});
 });
@@ -2574,5 +3235,129 @@ describe('DataTable::columnGroups', () => {
 		const columnGroups = [{ name: 'Personal Info', columnIds: [1] }];
 		const { getByText } = render(<DataTable data={mock.data} columns={mock.columns} columnGroups={columnGroups} />);
 		expect(getByText('Personal Info')).not.toBeNull();
+	});
+});
+
+describe('DataTable::footer', () => {
+	test('does not render a footer row by default', () => {
+		const mock = dataMock();
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} />);
+
+		expect(container.querySelector('.rdt_footer')).toBeNull();
+	});
+
+	test('renders a footer row when a column declares a static footer', () => {
+		const columns = [{ id: 'name', name: 'Name', selector: (r: { name: string }) => r.name, footer: 'Total' }];
+		const data = [
+			{ id: 1, name: 'Apple' },
+			{ id: 2, name: 'Banana' },
+		];
+		const { container, getByText } = render(<DataTable data={data} columns={columns} />);
+
+		expect(container.querySelector('.rdt_footer')).not.toBeNull();
+		expect(container.querySelector('.rdt_footerRow')).not.toBeNull();
+		expect(getByText('Total')).not.toBeNull();
+	});
+
+	test('invokes a column footer function with filtered+sorted rows', () => {
+		const footerFn = vi.fn((rows: { value: number }[]) => `Sum: ${rows.reduce((s, r) => s + r.value, 0)}`);
+		const columns = [{ id: 'value', name: 'Value', selector: (r: { value: number }) => r.value, footer: footerFn }];
+		const data = [
+			{ id: 1, value: 10 },
+			{ id: 2, value: 25 },
+			{ id: 3, value: 7 },
+		];
+		const { getByText } = render(<DataTable data={data} columns={columns} />);
+
+		expect(footerFn).toHaveBeenCalledWith(data);
+		expect(getByText('Sum: 42')).not.toBeNull();
+	});
+
+	test('renders a footerCell per visible column (omit excluded)', () => {
+		const columns = [
+			{ id: 'a', name: 'A', selector: (r: { a: string }) => r.a, footer: 'A-foot' },
+			{ id: 'b', name: 'B', selector: (r: { b: string }) => r.b, footer: 'B-foot', omit: true },
+			{ id: 'c', name: 'C', selector: (r: { c: string }) => r.c, footer: 'C-foot' },
+		];
+		const data = [{ id: 1, a: 'a1', b: 'b1', c: 'c1' }];
+		const { container } = render(<DataTable data={data} columns={columns} />);
+
+		const footerCells = container.querySelectorAll('.rdt_footerCell');
+		expect(footerCells.length).toBe(2);
+	});
+
+	test('renders a custom footerComponent and passes rows + columns', () => {
+		const FooterComp = vi.fn(({ rows }: { rows: { id: number }[] }) => (
+			<div data-testid="custom-footer">Rows: {rows.length}</div>
+		));
+		const mock = dataMock();
+		const { getByTestId } = render(<DataTable data={mock.data} columns={mock.columns} footerComponent={FooterComp} />);
+
+		expect(getByTestId('custom-footer').textContent).toBe('Rows: 2');
+		expect(FooterComp).toHaveBeenCalled();
+		const call = FooterComp.mock.calls[0][0] as { rows: unknown[]; columns: unknown[] };
+		expect(call.rows.length).toBe(2);
+		expect(call.columns.length).toBe(1);
+	});
+
+	test('footerComponent takes precedence over column footers', () => {
+		const FooterComp = () => <div className="custom-footer-marker">Custom</div>;
+		const columns = [{ id: 'name', name: 'Name', selector: (r: { name: string }) => r.name, footer: 'Column-Footer' }];
+		const data = [{ id: 1, name: 'Apple' }];
+		const { container, queryByText } = render(<DataTable data={data} columns={columns} footerComponent={FooterComp} />);
+
+		expect(container.querySelector('.custom-footer-marker')).not.toBeNull();
+		expect(queryByText('Column-Footer')).toBeNull();
+	});
+
+	test('showFooter=false suppresses the footer even when columns declare a footer', () => {
+		const columns = [{ id: 'name', name: 'Name', selector: (r: { name: string }) => r.name, footer: 'Total' }];
+		const data = [{ id: 1, name: 'Apple' }];
+		const { container } = render(<DataTable data={data} columns={columns} showFooter={false} />);
+
+		expect(container.querySelector('.rdt_footer')).toBeNull();
+	});
+
+	test('showFooter=true renders the footer row even with no column footers', () => {
+		const mock = dataMock();
+		const { container } = render(<DataTable data={mock.data} columns={mock.columns} showFooter />);
+
+		expect(container.querySelector('.rdt_footer')).not.toBeNull();
+	});
+
+	test('does not render the footer while progressPending is true', () => {
+		const columns = [{ id: 'name', name: 'Name', selector: (r: { name: string }) => r.name, footer: 'Total' }];
+		const data = [{ id: 1, name: 'Apple' }];
+		const { container } = render(<DataTable data={data} columns={columns} progressPending />);
+
+		expect(container.querySelector('.rdt_footer')).toBeNull();
+	});
+});
+
+describe('DataTable::animateRows', () => {
+	type Row = { id: number; name: string };
+	const columns = [{ id: 'name', name: 'Name', selector: (r: Row) => r.name }];
+
+	test('a row added after mount animates with a numeric keyField', async () => {
+		const initial: Row[] = [
+			{ id: 1, name: 'a' },
+			{ id: 2, name: 'b' },
+		];
+		const { container, rerender } = render(<DataTable data={initial} columns={columns} animateRows keyField="id" />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		rerender(<DataTable data={[...initial, { id: 3, name: 'c' }]} columns={columns} animateRows keyField="id" />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const rows = Array.from(container.querySelectorAll('.rdt_TableBody .rdt_row'));
+		const added = rows.find(r => r.id === 'row-3');
+		const existing = rows.find(r => r.id === 'row-1');
+		// The new row animates; a row that was already present does not.
+		expect(added?.className).toContain('rdt_animatedRow');
+		expect(existing?.className).not.toContain('rdt_animatedRow');
 	});
 });

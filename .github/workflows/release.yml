@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  lint-typecheck-test-build:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  release:
+    needs: lint-typecheck-test-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        run: npm version ${{ inputs.bump }} --no-git-tag-version
+
+      - name: Get new version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "Bumped to $VERSION"
+
+      - name: Build
+        run: npm run build
+
+      - name: Check version not already published
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          if npm view react-data-table-component@$VERSION version 2>/dev/null; then
+            echo "Error: v$VERSION is already published to npm"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public --ignore-scripts
+
+      - name: Commit and tag
+        run: |
+          git add package.json CHANGELOG.md
+          git commit -m "chore: release v${{ steps.version.outputs.value }} [skip ci]"
+          git tag "v${{ steps.version.outputs.value }}"
+          git push origin HEAD:master --follow-tags
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          # Extract everything between the ## X.Y.Z heading and the next --- or ## heading
+          NOTES=$(awk "/^## ${VERSION}$/{found=1; next} found && /^(---|## )/{exit} found{print}" CHANGELOG.md)
+          # GitHub Releases resolve root-relative links against github.com, so absolutize the docs links
+          NOTES=$(echo "$NOTES" | sed -E 's#\]\(/#](https://reactdatatable.com/#g')
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: v${{ steps.version.outputs.value }}
+          body: |
+            ${{ steps.notes.outputs.content }}
+
+            **Full changelog**: https://reactdatatable.com/docs/changelog
+          generate_release_notes: false

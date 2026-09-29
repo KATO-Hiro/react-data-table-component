@@ -3,7 +3,16 @@ import { tableReducer } from '../tableReducer';
 import { getNumberOfPages, recalculatePage } from '../util';
 import useDidUpdateEffect from './useDidUpdateEffect';
 import { SortOrder } from '../types';
-import type { Action, TableState, TableColumn, AllRowsAction, SingleRowAction, SortAction } from '../types';
+import type {
+	Action,
+	TableState,
+	TableColumn,
+	AllRowsAction,
+	SingleRowAction,
+	RangeRowAction,
+	SortAction,
+	SortColumn,
+} from '../types';
 
 interface UseTableStateProps<T> {
 	data: T[];
@@ -23,9 +32,17 @@ interface UseTableStateProps<T> {
 	selectableRowsVisibleOnly: boolean;
 	selectableRowSelected: ((row: T) => boolean) | null;
 	clearSelectedRows: boolean;
+	paginationPage?: number;
 	paginationResetDefaultPage: boolean;
+	/** Controlled selection. When provided, internal selection state is overridden. */
+	controlledSelectedRows?: T[];
 	onSelectedRowsChange: (state: { allSelected: boolean; selectedCount: number; selectedRows: T[] }) => void;
-	onSort: (selectedColumn: TableColumn<T>, sortDirection: SortOrder, sortedRows: T[]) => void;
+	onSort: (
+		selectedColumn: TableColumn<T>,
+		sortDirection: SortOrder,
+		sortedRows: T[],
+		sortColumns: SortColumn<T>[],
+	) => void;
 	onChangePage: (page: number, totalRows: number) => void;
 	onChangeRowsPerPage: (currentRowsPerPage: number, currentPage: number) => void;
 }
@@ -37,9 +54,11 @@ interface UseTableStateReturn<T> {
 	handleSort: (action: SortAction<T>) => void;
 	handleSelectAllRows: (action: AllRowsAction<T>) => void;
 	handleSelectedRow: (action: SingleRowAction<T>) => void;
+	handleSelectedRange: (action: RangeRowAction<T>) => void;
 	handleChangePage: (page: number) => void;
 	handleChangeRowsPerPage: (newRowsPerPage: number, tableRowsLength: number) => void;
 	handleClearSelectedRows: () => void;
+	handleClearSort: () => void;
 }
 
 /**
@@ -61,9 +80,10 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 		selectableRowsVisibleOnly,
 		selectableRowSelected,
 		clearSelectedRows,
+		paginationPage,
 		paginationResetDefaultPage,
+		controlledSelectedRows,
 		onSelectedRowsChange,
-		onSort,
 		onChangePage,
 		onChangeRowsPerPage,
 	} = props;
@@ -71,13 +91,26 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 	const { persistSelectedOnSort = false, persistSelectedOnPageChange = false } = paginationServerOptions;
 	const mergeSelections = paginationServer && (persistSelectedOnPageChange || persistSelectedOnSort);
 
-	const [tableState, dispatch] = React.useReducer<React.Reducer<TableState<T>, Action<T>>>(tableReducer, {
+	const hasDefaultSort = defaultSortColumn.id != null || !!defaultSortColumn.selector;
+
+	const reducer = React.useCallback(
+		(state: TableState<T>, action: Action<T>): TableState<T> => {
+			const calculatedState =
+				controlledSelectedRows !== undefined ? { ...state, selectedRows: controlledSelectedRows } : state;
+
+			return tableReducer(calculatedState, action);
+		},
+		[controlledSelectedRows],
+	);
+
+	const [tableState, dispatch] = React.useReducer(reducer, {
 		allSelected: false,
 		selectedCount: 0,
 		selectedRows: [],
 		selectedColumn: defaultSortColumn,
 		toggleOnSelectedRowsChange: false,
 		sortDirection: defaultSortDirection,
+		sortColumns: hasDefaultSort ? [{ column: defaultSortColumn, sortDirection: defaultSortDirection }] : [],
 		currentPage: paginationDefaultPage,
 		rowsPerPage: paginationPerPage,
 		selectedRowsFlag: false,
@@ -88,6 +121,10 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 		dispatch({ type: 'CLEAR_SELECTED_ROWS', selectedRowsFlag: false });
 	}, []);
 
+	const handleClearSort = React.useCallback(() => {
+		dispatch({ type: 'CLEAR_SORT', defaultSortColumn, defaultSortDirection });
+	}, [defaultSortColumn, defaultSortDirection]);
+
 	const handleSort = React.useCallback((action: SortAction<T>) => {
 		dispatch(action);
 	}, []);
@@ -97,6 +134,10 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 	}, []);
 
 	const handleSelectedRow = React.useCallback((action: SingleRowAction<T>) => {
+		dispatch(action);
+	}, []);
+
+	const handleSelectedRange = React.useCallback((action: RangeRowAction<T>) => {
 		dispatch(action);
 	}, []);
 
@@ -139,11 +180,6 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 		});
 	}, [tableState.toggleOnSelectedRowsChange]);
 
-	// Effect: Notify parent of sort changes
-	// Note: We pass sortedRows from parent to avoid circular dependency
-	const sortCallbackRef = React.useRef(onSort);
-	sortCallbackRef.current = onSort;
-
 	// Effect: Notify parent of page changes.
 	// Guard: when currentPage was reset by SORT_CHANGE, onSort is the authoritative
 	// callback — suppress onChangePage so the consumer doesn't double-fetch.
@@ -162,6 +198,13 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 	useDidUpdateEffect(() => {
 		handleChangePage(paginationDefaultPage);
 	}, [paginationDefaultPage, paginationResetDefaultPage]);
+
+	// Effect: Handle controlled page prop
+	useDidUpdateEffect(() => {
+		if (paginationPage !== undefined) {
+			handleChangePage(paginationPage);
+		}
+	}, [paginationPage]);
 
 	// Effect: Recalculate page when total rows change (server pagination)
 	useDidUpdateEffect(() => {
@@ -200,13 +243,28 @@ export default function useTableState<T>(props: UseTableStateProps<T>): UseTable
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [data]);
 
+	// Controlled-selection override: if the parent passes selectedRows, that wins over
+	// internal state. We still keep dispatching reducer actions so onSelectedRowsChange
+	// fires with the user-intended new selection — the parent is then expected to
+	// reflect that back via the controlled prop.
+	const effectiveTableState: TableState<T> = controlledSelectedRows
+		? {
+				...tableState,
+				selectedRows: controlledSelectedRows,
+				selectedCount: controlledSelectedRows.length,
+				allSelected: controlledSelectedRows.length > 0 && controlledSelectedRows.length === (data?.length ?? 0),
+			}
+		: tableState;
+
 	return {
-		tableState,
+		tableState: effectiveTableState,
 		handleSort,
 		handleSelectAllRows,
 		handleSelectedRow,
+		handleSelectedRange,
 		handleChangePage,
 		handleChangeRowsPerPage,
 		handleClearSelectedRows,
+		handleClearSort,
 	};
 }

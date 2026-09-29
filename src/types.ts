@@ -1,10 +1,11 @@
+import type React from 'react';
 import { Alignment, Direction, Media } from './constants';
 
 export type CSSObject = React.CSSProperties;
 
 // ── Column filter types ────────────────────────────────────────────────────────
 
-export type FilterType = 'text' | 'number' | 'date';
+export type FilterType = 'text' | 'number' | 'date' | 'datetime' | 'time' | 'set';
 
 export type FilterOperator =
 	| 'contains'
@@ -35,6 +36,33 @@ export type FilterState = {
 	condition2?: FilterCondition;
 	/** How condition1 and condition2 combine. Defaults to "AND". */
 	logic?: 'AND' | 'OR';
+	/** Selected values for `filterType: "set"`; blanks are the empty string. `undefined`
+	 *  matches every row, `[]` matches none. Unused by the other filter types. */
+	values?: string[];
+	/** The distinct values in the checklist when this set filter was applied. Cell values
+	 *  missing from this list are not filtered out, so rows added later stay visible.
+	 *  Set by the built-in panel; omit it to treat `values` as an exhaustive
+	 *  allow-list. Unused by the other filter types. */
+	knownValues?: string[];
+};
+
+/** Per-column filter settings. Only read by `filterType: "set"`. */
+export type SetFilterOptions<T = unknown> = {
+	/**
+	 * The checklist values, replacing the ones derived from the rows. Use it when the column has a
+	 * known domain the loaded rows may not cover, such as a status the server holds but the current
+	 * page does not. Order is kept as given, and blanks are only offered if the list contains an
+	 * empty string. The function form receives the rows the table is holding, so a fixed domain can
+	 * be merged with whatever else turned up.
+	 */
+	values?: string[] | ((rows: T[]) => string[]);
+	/**
+	 * Splits a cell holding several values into its parts, so a column formatted as
+	 * "React, TypeScript" offers each tag in the checklist rather than the whole string. A row
+	 * matches when any of its parts is selected. Parts are trimmed and empty ones dropped, so a
+	 * cell is blank only when nothing is left after the split.
+	 */
+	separator?: string | RegExp;
 };
 
 export enum SortOrder {
@@ -42,7 +70,13 @@ export enum SortOrder {
 	DESC = 'desc',
 }
 
-export type Primitive = string | number | boolean;
+/** A single column participating in a (possibly multi-column) sort, in priority order. */
+export type SortColumn<T> = {
+	column: TableColumn<T>;
+	sortDirection: SortOrder;
+};
+
+export type Primitive = string | number | boolean | bigint | Date;
 export type ColumnSortFunction<T> = (a: T, b: T) => number;
 export type ExpandRowToggled<T> = (expanded: boolean, row: T) => void;
 export type Format<T> = (row: T, rowIndex: number) => React.ReactNode;
@@ -65,11 +99,70 @@ export type PaginationComponentProps = {
 	paginationRowsPerPageOptions?: number[];
 	paginationIcons?: PaginationIcons;
 	paginationComponentOptions?: PaginationOptions;
+	localization?: Localization['pagination'];
 };
 export type PaginationComponent = React.ComponentType<PaginationComponentProps>;
 
+/** Renders a column's footer cell. Either a static node, or a function that
+ *  receives the filtered+sorted rows for the current view and returns a node
+ *  (typically an aggregate such as a sum or average). */
+export type ColumnFooter<T> = React.ReactNode | ((rows: T[]) => React.ReactNode);
+
+/** Props passed to a custom `footerComponent`. */
+export type FooterComponentProps<T> = {
+	/** Filtered + sorted rows in the current view. With server-side pagination
+	 *  this is whatever data the parent passed in — page-bound, not the full dataset. */
+	rows: T[];
+	/** The column definitions in their current visible order. */
+	columns: TableColumn<T>[];
+};
+
+export type FooterComponent<T> = React.ComponentType<FooterComponentProps<T>>;
+
 export type DataTableHandle = {
 	clearSelectedRows: () => void;
+	clearSort: () => void;
+};
+
+// ── Context menu types ────────────────────────────────────────────────────────
+
+export type ContextMenuTrigger = 'right-click' | 'menu-button' | 'both';
+
+/** Which inline edge the row menu button sits on. Logical (RTL-aware): `'end'` is
+ *  the row's inline end (right in LTR), `'start'` the inline start (left in LTR). */
+export type ContextMenuPosition = 'start' | 'end';
+
+export type ContextMenuConfig = {
+	/** Enable the header context menu. Defaults to `true`. */
+	header?: boolean;
+	/** Enable the row context menu. Only opens when `contextMenuActions.row` returns items. Defaults to `true`. */
+	row?: boolean;
+	/** How the menu opens. Defaults to `'right-click'`. */
+	trigger?: ContextMenuTrigger;
+	/** Which inline edge the row menu button sits on. Defaults to `'end'`. */
+	menuPosition?: ContextMenuPosition;
+};
+
+/** A single item in a context menu. Built-in header actions use the reserved ids
+ *  `sort-asc`, `sort-desc`, `clear-sort`, `pin-left`, `pin-right`, `unpin`,
+ *  `hide-column`, and `reset`. */
+export type ContextMenuAction = {
+	id: string;
+	label: React.ReactNode;
+	disabled?: boolean;
+	/** Optional icon rendered before the label. */
+	icon?: React.ReactNode;
+};
+
+/** What the selected menu action applies to. */
+export type ContextMenuActionContext<T> =
+	{ type: 'header'; column: TableColumn<T> } | { type: 'row'; row: T; rowIndex: number };
+
+export type ContextMenuActions<T> = {
+	/** Extra header menu items, appended after the built-ins. A static list or a function of the column. */
+	header?: ContextMenuAction[] | ((column: TableColumn<T>) => ContextMenuAction[]);
+	/** Row menu items. The row menu renders only these — there are no built-in row actions. */
+	row?: (row: T, rowIndex: number) => ContextMenuAction[];
 };
 
 // ── Feature-group prop types ──────────────────────────────────────────────────
@@ -87,6 +180,20 @@ type SelectionProps<T> = {
 	selectableRowsNoSelectAll?: boolean;
 	selectableRowsVisibleOnly?: boolean;
 	selectableRowsSingle?: boolean;
+	/**
+	 * Controlled selection. When provided, DataTable uses this array as the source of truth
+	 * for which rows are selected and calls `onSelectedRowsChange` whenever the user toggles a row,
+	 * a range, or the select-all checkbox. Omit to use internal selection state (default).
+	 *
+	 * Rows are matched by `keyField`, so each row in `selectedRows` must contain its key.
+	 */
+	selectedRows?: T[];
+	/**
+	 * Enable Shift-click range selection on the row checkbox. When the user clicks one row's
+	 * checkbox, then Shift-clicks another, every row in between is toggled to match the anchor.
+	 * Ignored when `selectableRowsSingle` is true. Defaults to `true`.
+	 */
+	selectableRowsRange?: boolean;
 };
 
 export interface PaginationIcons {
@@ -108,6 +215,8 @@ type PaginationProps = {
 	 */
 	paginationIcons?: PaginationIcons;
 	paginationPerPage?: number;
+	paginationPage?: number;
+	paginationPosition?: 'top' | 'bottom' | 'both';
 	paginationResetDefaultPage?: boolean;
 	paginationRowsPerPageOptions?: number[];
 	paginationServer?: boolean;
@@ -130,18 +239,33 @@ type ExpandableProps<T> = {
 	expandOnRowClicked?: boolean;
 	expandOnRowDoubleClicked?: boolean;
 	onRowExpandToggled?: ExpandRowToggled<T>;
+	/**
+	 * @deprecated Use the `localization` prop instead: `localization={{ expandable: { ... } }}`. Will be removed in v9.
+	 */
+	expandableRowsOptions?: ExpandableRowsOptions;
 };
 
 type SortProps<T> = {
 	defaultSortAsc?: boolean;
 	defaultSortFieldId?: string | number | null | undefined;
-	onSort?: (selectedColumn: TableColumn<T>, sortDirection: SortOrder, sortedRows: T[]) => void;
+	onSort?: (
+		selectedColumn: TableColumn<T>,
+		sortDirection: SortOrder,
+		sortedRows: T[],
+		sortColumns: SortColumn<T>[],
+	) => void;
 	sortFunction?: SortFunction<T> | null;
 	/**
 	 * @deprecated Pass via the theme instead: `createTheme('t', { icons: { sort: <Icon /> } })`
 	 */
 	sortIcon?: React.ReactNode;
 	sortServer?: boolean;
+	/**
+	 * Enable multi-column sorting. Hold Ctrl (or ⌘ on macOS) while clicking a column
+	 * header to add it to the existing sort instead of replacing it. Sort priority follows
+	 * the order columns are added. Defaults to `false`.
+	 */
+	sortMulti?: boolean;
 };
 
 type BaseTableProps<T> = {
@@ -167,6 +291,8 @@ type BaseTableProps<T> = {
 	onRowMiddleClicked?: (row: T, e: React.MouseEvent) => void;
 	onRowMouseEnter?: (row: T, e: React.MouseEvent) => void;
 	onRowMouseLeave?: (row: T, e: React.MouseEvent) => void;
+	/** Called when the user scrolls the table body. Works with both `fixedHeader` enabled and disabled. */
+	onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
 	/** Enable drag-to-resize handles on column headers */
 	resizable?: boolean;
 	/**
@@ -180,6 +306,16 @@ type BaseTableProps<T> = {
 	 * so you can persist to localStorage, a database, or anywhere else.
 	 */
 	onColumnResize?: (columnId: string | number, width: number, allWidths: Record<string | number, number>) => void;
+	/**
+	 * Enable spreadsheet-style keyboard navigation between cells. The table renders as a
+	 * WAI-ARIA grid (`role="grid"`, single Tab stop, roving tabindex): arrow keys move
+	 * between cells — including selection checkboxes, expander buttons, and the header
+	 * row — Home/End jump to the row edges, and Ctrl+Home/Ctrl+End jump to the grid
+	 * corners. Enter or F2 opens the focused cell's editor if it has one
+	 * (`editable`/`editor`) and Escape cancels it; Enter or Space on a header sorts the
+	 * column. Navigation is clamped to the current page. Defaults to `false`.
+	 */
+	cellNavigation?: boolean;
 	/** Animate rows on mount and expander rows on expand (respects prefers-reduced-motion) */
 	animateRows?: boolean;
 	/**
@@ -207,6 +343,31 @@ type BaseTableProps<T> = {
 	filterValues?: Record<string | number, FilterState>;
 	/** Called when the user clicks Apply in a column filter popup. */
 	onFilterChange?: (columnId: string | number, filter: FilterState) => void;
+	/**
+	 * The data is filtered server-side, so skip the built-in client-side pass. The filter
+	 * popups still render and still call `onFilterChange`; use it to refetch. Without this,
+	 * a server-filtered page gets filtered a second time against rows it no longer holds.
+	 * Implied by `paginationServer`. Defaults to `false`.
+	 */
+	filterServer?: boolean;
+	/** Override every user-visible string in DataTable. Pass a pre-built locale or build your own. */
+	localization?: Localization;
+	/**
+	 * Enable a context menu on header cells and rows. Pass `true` to enable both with the
+	 * default right-click trigger, or a config object to choose surfaces and trigger
+	 * (`'right-click' | 'menu-button' | 'both'`). The header menu ships built-in actions
+	 * (sort, pin, hide, reset); the row menu renders the items returned by
+	 * `contextMenuActions.row` and stays closed when there are none.
+	 */
+	contextMenu?: boolean | ContextMenuConfig;
+	/** Consumer-supplied menu items. Header items are appended after the built-ins. */
+	contextMenuActions?: ContextMenuActions<T>;
+	/** Called when any menu item is selected — built-ins included, after their effect is applied. */
+	onContextMenuAction?: (action: ContextMenuAction, ctx: ContextMenuActionContext<T>) => void;
+	/**
+	 * @deprecated Use the `localization` prop instead: `localization={{ filter: { ... } }}`. Will be removed in v9.
+	 */
+	columnFilterOptions?: ColumnFilterOptions;
 	onColumnOrderChange?: (nextOrder: TableColumn<T>[]) => void;
 	/** Called after a group drag reorder with the new group order and matching column order. */
 	onColumnGroupOrderChange?: (nextGroups: ColumnGroup[], nextColumns: TableColumn<T>[]) => void;
@@ -214,6 +375,7 @@ type BaseTableProps<T> = {
 	pointerOnHover?: boolean;
 	progressComponent?: React.ReactNode;
 	progressPending?: boolean;
+	progressSkeleton?: boolean;
 	responsive?: boolean;
 	striped?: boolean;
 	style?: CSSObject;
@@ -228,6 +390,18 @@ type BaseTableProps<T> = {
 	 *  Shows and displays a header with a title
 	 *  */
 	title?: string | React.ReactNode;
+	/**
+	 * Replace the built-in footer row with a custom component. Receives `rows`
+	 * (filtered + sorted) and `columns`. When omitted, the footer row is built
+	 * from each column's `footer` field.
+	 */
+	footerComponent?: FooterComponent<T>;
+	/**
+	 * Force the footer row to render. By default the footer renders only when
+	 * `footerComponent` is set or at least one visible column defines a `footer`.
+	 * Set to `false` to suppress the footer entirely.
+	 */
+	showFooter?: boolean;
 };
 
 export type TableProps<T> = BaseTableProps<T> & SelectionProps<T> & PaginationProps & ExpandableProps<T> & SortProps<T>;
@@ -239,7 +413,7 @@ export type TableColumnBase = {
 	compact?: boolean;
 	reorder?: boolean;
 	grow?: number;
-	hide?: number | Media;
+	hide?: Media;
 	id?: string | number;
 	ignoreRowClick?: boolean;
 	maxWidth?: string;
@@ -250,7 +424,8 @@ export type TableColumnBase = {
 	sortable?: boolean;
 	/** Enable the built-in filter popup for this column. */
 	filterable?: boolean;
-	/** Filter input type. Determines the available operators and input widget. Defaults to "text". */
+	/** Filter input type. Determines the available operators and input widget. Defaults to "text".
+	 *  "set" replaces the operator UI with a checklist of the column's distinct values. */
 	filterType?: FilterType;
 	style?: CSSObject;
 	width?: string;
@@ -264,15 +439,51 @@ export type TableColumnBase = {
 	editor?: CellEditor;
 };
 
+/** Context passed to a custom editor's render function. */
+export interface CustomCellEditorContext<T = unknown> {
+	/** The current row being edited. */
+	row: T;
+	/** Current editor value (string). Custom editors stay in sync via `setValue`. */
+	value: string;
+	/** Update the in-flight editor value without committing. */
+	setValue: (next: string) => void;
+	/** Commit the edit. If a value is passed it is used; otherwise the current value is committed. */
+	commit: (value?: string) => void;
+	/** Close the editor without firing onCellEdit. */
+	cancel: () => void;
+	/** The column definition. */
+	column: TableColumn<T>;
+	/** Current validation error from `validate`, or `null`. Set when a commit was rejected with a message. */
+	error: string | null;
+	/** Attach as `ref` on your focusable element to opt in to auto-focus on open and refocus after a rejected commit. */
+	inputRef: React.RefCallback<HTMLElement>;
+}
+
 /** Options for inline cell editors. */
-export type CellEditor =
+export type CellEditor<T = unknown> =
 	| { type: 'text'; placeholder?: string }
+	| { type: 'number'; placeholder?: string; min?: number; max?: number; step?: number }
+	| { type: 'date'; min?: string; max?: string }
+	| { type: 'checkbox' }
 	| {
 			type: 'select';
 			options: Array<{ value: string; label: React.ReactNode }>;
 			/** Optional placeholder shown when current value is empty/unknown. */
 			placeholder?: string;
+	  }
+	| {
+			type: 'custom';
+			/** Render your own editor element. Use `ctx.commit()` / `ctx.cancel()` to finish. */
+			render: (ctx: CustomCellEditorContext<T>) => React.ReactNode;
 	  };
+
+/**
+ * Validate result returned from a column's `validate` function.
+ * - `true`: accept the edit.
+ * - `false`: reject silently.
+ * - `string`: reject and surface the message as an inline validation error.
+ */
+export type CellValidateResult = true | false | string;
 
 export type CellEditCallback<T> = (row: T, value: string, column: TableColumn<T>) => void;
 
@@ -291,8 +502,21 @@ export interface TableColumn<T> extends TableColumnBase {
 	sortFunction?: ColumnSortFunction<T>;
 	/** Custom filter function — overrides built-in operator logic. Receives the full FilterState so both conditions are available. */
 	filterFunction?: (row: T, filter: FilterState) => boolean;
+	/** Settings for this column's filter. Only read by `filterType: "set"`. */
+	filterOptions?: SetFilterOptions<T>;
 	/** Called when the user commits an inline edit (blur or Enter). Only fires when editable: true. */
 	onCellEdit?: CellEditCallback<T>;
+	/**
+	 * Validate an inline-edit value before `onCellEdit` fires.
+	 * Return `true` to accept, `false` to reject silently, or a string error to display.
+	 */
+	validate?: (value: string, row: T, column: TableColumn<T>) => CellValidateResult;
+	/**
+	 * Footer cell for this column. Pass a `ReactNode` for a static value, or a function
+	 * `(rows) => ReactNode` to compute an aggregate from the filtered+sorted rows.
+	 * When any visible column defines a `footer`, a footer row renders below the body.
+	 */
+	footer?: ColumnFooter<T>;
 }
 
 /** A column group renders as a spanning header row above the regular header row. */
@@ -366,6 +590,12 @@ export interface TableStyles {
 		style?: CSSObject;
 		pageButtonsStyle?: CSSObject;
 	};
+	footer?: {
+		style?: CSSObject;
+	};
+	footerCells?: {
+		style?: CSSObject;
+	};
 	noData?: {
 		style: CSSObject;
 	};
@@ -380,6 +610,129 @@ export interface PaginationOptions {
 	rangeSeparatorText?: string;
 	selectAllRowsItem?: boolean;
 	selectAllRowsItemText?: string;
+}
+
+/**
+ * @deprecated Use `Localization['filter']` instead. Will be removed in v9.
+ */
+export type ColumnFilterOptions = NonNullable<Localization['filter']>;
+
+/**
+ * @deprecated Use `Localization['expandable']` instead. Will be removed in v9.
+ */
+export type ExpandableRowsOptions = NonNullable<Localization['expandable']>;
+
+/** All user-visible strings rendered by DataTable, grouped by feature area. */
+export interface Localization {
+	pagination?: {
+		/** aria-label for the pagination nav element. Default: "Table pagination" */
+		navigationAriaLabel?: string;
+		/** aria-label for the First Page button. Default: "First Page" */
+		firstPageAriaLabel?: string;
+		/** aria-label for the Previous Page button. Default: "Previous Page" */
+		previousPageAriaLabel?: string;
+		/** aria-label for the Next Page button. Default: "Next Page" */
+		nextPageAriaLabel?: string;
+		/** aria-label for the Last Page button. Default: "Last Page" */
+		lastPageAriaLabel?: string;
+	};
+	filter?: {
+		/** aria-label for the filter icon button when no filter is active. Default: "Filter column" */
+		filterColumnAriaLabel?: string;
+		/** aria-label for the filter icon button when a filter is active. Default: "Filter active" */
+		filterActiveAriaLabel?: string;
+		/** aria-label for the filter panel dialog. Default: "Column filter" */
+		filterPanelAriaLabel?: string;
+		/** aria-label for the operator select element. Default: "Filter operator" */
+		operatorAriaLabel?: string;
+		/** Placeholder for the first value input. Default: "Value" */
+		valuePlaceholder?: string;
+		/** aria-label for the first value input. Default: "Filter value" */
+		valueAriaLabel?: string;
+		/** Placeholder for the second value input. Default: "Value" */
+		value2Placeholder?: string;
+		/** aria-label for the second value input (between operator). Default: "Filter second value" */
+		value2AriaLabel?: string;
+		/** Separator text between the two inputs for the "between" operator. Default: "and" */
+		betweenSeparatorText?: string;
+		/** aria-label for the remove-condition button. Default: "Remove condition" */
+		removeConditionAriaLabel?: string;
+		/** aria-label for the add-condition button. Default: "Add a second filter condition" */
+		addConditionAriaLabel?: string;
+		/** Label for the add-condition button. Default: "+ Add condition" */
+		addConditionLabel?: string;
+		/** Label for the Clear button. Default: "Clear" */
+		clearLabel?: string;
+		/** Label for the Apply button. Default: "Apply" */
+		applyLabel?: string;
+		/** Label for the AND logic button. Default: "AND" */
+		andLabel?: string;
+		/** Label for the OR logic button. Default: "OR" */
+		orLabel?: string;
+		/** Label for the select-all checkbox in a "set" filter. Default: "(Select all)" */
+		selectAllLabel?: string;
+		/** aria-label for the select-all checkbox while a search is narrowing the list, where it
+		 *  acts only on the matches. Default: "(Select all) search results" */
+		selectAllFilteredAriaLabel?: string;
+		/** Label for the blank-values entry in a "set" filter. Default: "(Blanks)" */
+		blanksLabel?: string;
+		/** Placeholder for the search box in a "set" filter. Default: "Search" */
+		searchPlaceholder?: string;
+		/** aria-label for the search box in a "set" filter. Default: "Search filter values" */
+		searchAriaLabel?: string;
+		/** Text shown when a "set" filter search matches nothing. Default: "No matches" */
+		noMatchesText?: string;
+		/** Labels for filter operators. */
+		operators?: {
+			contains?: string;
+			notContains?: string;
+			equals?: string;
+			notEquals?: string;
+			startsWith?: string;
+			endsWith?: string;
+			blank?: string;
+			notBlank?: string;
+			gt?: string;
+			gte?: string;
+			lt?: string;
+			lte?: string;
+			between?: string;
+			before?: string;
+			after?: string;
+		};
+	};
+	expandable?: {
+		/** aria-label for the expand button. Default: "Expand Row" */
+		expandRowAriaLabel?: string;
+		/** aria-label for the collapse button. Default: "Collapse Row" */
+		collapseRowAriaLabel?: string;
+	};
+	contextMenu?: {
+		/** aria-label for the header menu. Default: "Column menu" */
+		headerMenuAriaLabel?: string;
+		/** aria-label for the row menu. Default: "Row menu" */
+		rowMenuAriaLabel?: string;
+		/** aria-label for the header menu (⋮) button. Default: "Column actions" */
+		headerMenuButtonAriaLabel?: string;
+		/** aria-label for the row menu (⋮) button. Default: "Row actions" */
+		rowMenuButtonAriaLabel?: string;
+		/** Label for the sort-ascending item. Default: "Sort ascending" */
+		sortAscLabel?: string;
+		/** Label for the sort-descending item. Default: "Sort descending" */
+		sortDescLabel?: string;
+		/** Label for the clear-sort item. Default: "Clear sort" */
+		clearSortLabel?: string;
+		/** Label for the pin-left item. Default: "Pin left" */
+		pinLeftLabel?: string;
+		/** Label for the pin-right item. Default: "Pin right" */
+		pinRightLabel?: string;
+		/** Label for the unpin item. Default: "Unpin" */
+		unpinLabel?: string;
+		/** Label for the hide-column item. Default: "Hide column" */
+		hideColumnLabel?: string;
+		/** Label for the reset item. Default: "Reset table" */
+		resetLabel?: string;
+	};
 }
 
 export interface PaginationServerOptions {
@@ -407,6 +760,9 @@ export type TableState<T> = {
 	selectedRows: T[];
 	selectedColumn: TableColumn<T>;
 	sortDirection: SortOrder;
+	/** Full sort configuration in priority order. The primary entry mirrors
+	 *  `selectedColumn`/`sortDirection`. Empty when nothing is sorted. */
+	sortColumns: SortColumn<T>[];
 	currentPage: number;
 	rowsPerPage: number;
 	selectedRowsFlag: boolean;
@@ -431,6 +787,8 @@ type ThemeBackground = {
 	default: string;
 	/** Optional separate background for column header rows. Falls back to `default`. */
 	header?: string;
+	/** Optional separate background for the footer row. Falls back to `default`. */
+	footer?: string;
 };
 
 type ThemeContext = {
@@ -533,13 +891,13 @@ export interface Theme {
 	/** Checkbox appearance — controls the CSS variables for the built-in CSS checkbox. */
 	checkbox?: { size?: string; borderRadius?: string };
 	/**
-	 * Default header column separator behaviour for this theme.
+	 * Default header column separator behavior for this theme.
 	 * The `headerSeparator` prop overrides this when explicitly passed.
 	 * Omitting both falls back to `'subtle'`.
 	 */
 	headerSeparator?: boolean | 'subtle' | 'full';
 	/**
-	 * Default body column separator behaviour for this theme.
+	 * Default body column separator behavior for this theme.
 	 * The `columnSeparator` prop overrides this when explicitly passed.
 	 * Omitting both falls back to `false` (no separator).
 	 */
@@ -564,6 +922,19 @@ export interface SingleRowAction<T> {
 	singleSelect: boolean;
 }
 
+export interface RangeRowAction<T> {
+	type: 'SELECT_RANGE';
+	keyField: string;
+	/** Rows in the range (inclusive of both endpoints), in visible order. */
+	rangeRows: T[];
+	/** Total row count for `allSelected` calculation. */
+	rowCount: number;
+	/** Target state for all rows in the range — derived from the anchor row's selected state. */
+	select: boolean;
+	/** Rows that cannot be toggled (returned by selectableRowDisabled). */
+	disabledRows?: T[];
+}
+
 export interface MultiRowAction<T> {
 	type: 'SELECT_MULTIPLE_ROWS';
 	keyField: string;
@@ -574,9 +945,15 @@ export interface MultiRowAction<T> {
 
 export interface SortAction<T> {
 	type: 'SORT_CHANGE';
-	sortDirection: SortOrder;
 	selectedColumn: TableColumn<T>;
 	clearSelectedOnSort: boolean;
+	/** When true, add/update this column in the existing sort instead of replacing it. */
+	additive: boolean;
+	/** Direction a freshly clicked column sorts in first (from `defaultSortAsc`). */
+	defaultSortDirection: SortOrder;
+	/** Force a specific direction instead of cycling — used by the context menu's
+	 *  explicit sort-ascending / sort-descending actions. */
+	direction?: SortOrder;
 }
 
 export interface PaginationPageAction {
@@ -598,11 +975,19 @@ export interface ClearSelectedRowsAction {
 	selectedRowsFlag: boolean;
 }
 
+export interface ClearSortAction<T> {
+	type: 'CLEAR_SORT';
+	defaultSortColumn: TableColumn<T>;
+	defaultSortDirection: SortOrder;
+}
+
 export type Action<T> =
 	| AllRowsAction<T>
 	| SingleRowAction<T>
+	| RangeRowAction<T>
 	| MultiRowAction<T>
 	| SortAction<T>
 	| PaginationPageAction
 	| PaginationRowsPerPageAction
-	| ClearSelectedRowsAction;
+	| ClearSelectedRowsAction
+	| ClearSortAction<T>;

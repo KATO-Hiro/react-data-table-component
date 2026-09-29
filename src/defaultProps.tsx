@@ -56,6 +56,7 @@ export const defaultProps = {
 	progressPending: false,
 	progressComponent: (
 		<div
+			className="rdt_spinner"
 			style={{
 				width: 28,
 				height: 28,
@@ -66,10 +67,13 @@ export const defaultProps = {
 			}}
 		/>
 	),
+	progressSkeleton: true,
 	persistTableHead: false,
 	sortIcon: null,
 	sortFunction: null,
 	sortServer: false,
+	filterServer: false,
+	sortMulti: false,
 	striped: false,
 	highlightOnHover: false,
 	pointerOnHover: false,
@@ -96,6 +100,7 @@ export const defaultProps = {
 	paginationResetDefaultPage: false,
 	paginationTotalRows: 0,
 	paginationPerPage: 10,
+	paginationPosition: 'bottom' as const,
 	paginationRowsPerPageOptions: [10, 15, 20, 25, 30],
 	paginationComponent: null,
 	paginationComponentOptions: {},

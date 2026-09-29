@@ -11,6 +11,18 @@ export { default as useTableData } from './hooks/useTableData';
 export { default as useColumnFilter } from './hooks/useColumnFilter';
 export { default as useColumnVisibility } from './hooks/useColumnVisibility';
 export type { UseColumnVisibilityResult, ColumnVisibilityEntry } from './hooks/useColumnVisibility';
+export { default as useTableExport } from './hooks/useTableExport';
+export type { UseTableExportOptions, UseTableExportResult, ExportFormat } from './hooks/useTableExport';
+export { default as useCellNavigation } from './hooks/useCellNavigation';
+export type { UseCellNavigationOptions } from './hooks/useCellNavigation';
+export type { ActiveCell } from './context/RowContext';
+export { default as useColumnResize } from './hooks/useColumnResize';
+export type { UseColumnResizeOptions } from './hooks/useColumnResize';
+
+// Pure helpers behind column pinning — call these directly if you're rendering your own
+// markup and want sticky-offset positions without pulling in <DataTable />.
+export { getPinnedOffsets, getPinnedTotalWidths, getPinnedCellMeta } from './util';
+export type { PinnedOffsets, PinnedCellMeta } from './util';
 
 export { SortOrder } from './types';
 
@@ -32,14 +44,32 @@ export type {
 	ThemeIcons,
 	PaginationOptions,
 	PaginationServerOptions,
+	Localization,
+	/** @deprecated Use `Localization['filter']` instead. Will be removed in v9. */
+	ColumnFilterOptions,
+	/** @deprecated Use `Localization['expandable']` instead. Will be removed in v9. */
+	ExpandableRowsOptions,
 	SortFunction,
+	SortColumn,
 	Selector,
 	FilterType,
 	FilterOperator,
 	FilterCondition,
 	FilterState,
+	SetFilterOptions,
 	CellEditor,
 	CellEditCallback,
+	CellValidateResult,
+	CustomCellEditorContext,
+	ContextMenuAction,
+	ContextMenuActionContext,
+	ContextMenuActions,
+	ContextMenuConfig,
+	ContextMenuTrigger,
+	ContextMenuPosition,
+	ColumnFooter,
+	FooterComponent,
+	FooterComponentProps,
 } from './types';
 
 export { emptyFilterState, isFilterActive } from './hooks/useColumnFilter';

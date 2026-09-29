@@ -3,10 +3,10 @@ import '../DataTable.css';
 import { useStyles } from '../context/StylesContext';
 import Select from './Select';
 import { getNumberOfPages } from '../util';
-import useWindowSize from '../hooks/useWindowSize';
+import useIsomorphicLayoutEffect from '../hooks/useIsomorphicLayoutEffect';
 import useRTL from '../hooks/useRTL';
 import { Direction } from '../constants';
-import type { PaginationIcons, PaginationOptions, PaginationChangePage } from '../types';
+import type { PaginationIcons, PaginationOptions, PaginationChangePage, Localization } from '../types';
 import { defaultProps, DEFAULT_PAGINATION_ICONS } from '../defaultProps';
 
 const defaultComponentOptions = {
@@ -25,6 +25,7 @@ interface PaginationProps {
 	paginationRowsPerPageOptions?: number[];
 	paginationIcons?: PaginationIcons;
 	paginationComponentOptions?: PaginationOptions;
+	localization?: Localization['pagination'];
 	onChangePage: PaginationChangePage;
 	onChangeRowsPerPage: (numRows: number, currentPage: number) => void;
 }
@@ -37,12 +38,32 @@ function Pagination({
 	paginationRowsPerPageOptions = defaultProps.paginationRowsPerPageOptions,
 	paginationIcons = DEFAULT_PAGINATION_ICONS,
 	paginationComponentOptions = defaultProps.paginationComponentOptions,
+	localization,
 	onChangeRowsPerPage = defaultProps.onChangeRowsPerPage,
 	onChangePage = defaultProps.onChangePage,
 }: PaginationProps): JSX.Element {
-	const windowSize = useWindowSize();
+	const navRef = React.useRef<HTMLElement>(null);
+	const [containerWidth, setContainerWidth] = React.useState(0);
+
+	// Layout keys off the pagination's own width, not the window's: the table can
+	// sit in a container far narrower than the viewport (split panes, cards),
+	// where a window-based check renders the wide layout into a space that can't
+	// fit it. Starting at 0 (narrow) also matches SSR output, so hydration is
+	// clean; the layout effect measures before first paint, so there's no flash.
+	useIsomorphicLayoutEffect(() => {
+		const nav = navRef.current;
+		if (!nav) {
+			return;
+		}
+		const update = () => setContainerWidth(nav.getBoundingClientRect().width);
+		update();
+		const ro = new ResizeObserver(update);
+		ro.observe(nav);
+		return () => ro.disconnect();
+	}, []);
+
 	const isRTL = useRTL(direction);
-	const shouldShow = windowSize.width && windowSize.width > 599;
+	const shouldShow = containerWidth > 599;
 	const numPages = getNumberOfPages(rowCount, rowsPerPage);
 	const lastIndex = currentPage * rowsPerPage;
 	const firstIndex = lastIndex - rowsPerPage + 1;
@@ -101,8 +122,9 @@ function Pagination({
 
 	return (
 		<nav
-			className={['rdt_pagination', 'rdt_Pagination'].join(' ')}
-			aria-label="Table pagination"
+			ref={navRef}
+			className={['rdt_pagination', 'rdt_Pagination', !shouldShow && 'rdt_paginationNarrow'].filter(Boolean).join(' ')}
+			aria-label={localization?.navigationAriaLabel ?? 'Table pagination'}
 			style={customStyles.pagination?.style}
 		>
 			{!options.noRowsPerPage && shouldShow && (
@@ -116,7 +138,7 @@ function Pagination({
 				<button
 					id="pagination-first-page"
 					type="button"
-					aria-label="First Page"
+					aria-label={localization?.firstPageAriaLabel ?? 'First Page'}
 					aria-disabled={disabledLesser}
 					onClick={handleFirst}
 					disabled={disabledLesser}
@@ -128,7 +150,7 @@ function Pagination({
 				<button
 					id="pagination-previous-page"
 					type="button"
-					aria-label="Previous Page"
+					aria-label={localization?.previousPageAriaLabel ?? 'Previous Page'}
 					aria-disabled={disabledLesser}
 					onClick={handlePrevious}
 					disabled={disabledLesser}
@@ -141,7 +163,7 @@ function Pagination({
 				<button
 					id="pagination-next-page"
 					type="button"
-					aria-label="Next Page"
+					aria-label={localization?.nextPageAriaLabel ?? 'Next Page'}
 					aria-disabled={disabledGreater}
 					onClick={handleNext}
 					disabled={disabledGreater}
@@ -153,7 +175,7 @@ function Pagination({
 				<button
 					id="pagination-last-page"
 					type="button"
-					aria-label="Last Page"
+					aria-label={localization?.lastPageAriaLabel ?? 'Last Page'}
 					aria-disabled={disabledGreater}
 					onClick={handleLast}
 					disabled={disabledGreater}

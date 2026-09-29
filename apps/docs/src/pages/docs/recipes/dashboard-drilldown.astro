@@ -1,0 +1,123 @@
+---
+import DocsLayout from '../../../layouts/DocsLayout.astro';
+import CodeBlock from '../../../components/CodeBlock.astro';
+import Demo from '../../../components/Demo.astro';
+import DashboardDrilldownDemo from '../../../components/demos/DashboardDrilldownDemo.tsx';
+import dashboardDrilldownSource from '../../../components/demos/DashboardDrilldownDemo.tsx?raw';
+---
+
+<DocsLayout title="Dashboard with drill-down | Recipes | react-data-table-component" description="Combine expandable rows, conditional row styles, and custom cell renderers to build a department dashboard with per-row drill-down into team members.">
+  <h1>Dashboard with drill-down</h1>
+
+  <p>
+    A department overview table that combines <strong>expandable rows</strong>,
+    <strong>conditional row styles</strong> for health status, and custom <code>cell</code>
+    renderers for inline progress bars. Expand any row to drill into a card grid of individual
+    team members — the detail panel is a plain React component, not another table.
+  </p>
+
+  <Demo
+    title="Department dashboard"
+    description="Expand a department row to see individual team member utilization."
+    code={dashboardDrilldownSource}
+  >
+    <DashboardDrilldownDemo client:load />
+  </Demo>
+
+  <p class="text-xs text-gray-400 -mt-4">
+    This demo uses Tailwind utility classes for layout — swap in your own CSS when copying into your project.
+  </p>
+
+  <h2>Conditional row styles</h2>
+
+  <p>
+    Tint rows based on a derived health field so problems are visible at a glance — no extra
+    column needed:
+  </p>
+
+  <CodeBlock code={`const conditionalRowStyles: ConditionalStyles<Department>[] = [
+  { when: r => r.health === 'critical', style: { backgroundColor: '#fff7f7' } },
+  { when: r => r.health === 'at-risk',  style: { backgroundColor: '#fffdf0' } },
+];`} />
+
+  <h2>A card layout in the expander, not a nested table</h2>
+
+  <p>
+    <code>expandableRowsComponent</code> can render anything — it doesn't have to be another
+    <code>DataTable</code>. A grid of team-member cards reads better here than a table-in-a-table.
+    The parent row arrives as <code>data</code>:
+  </p>
+
+  <CodeBlock code={`function DepartmentDetail({ data: dept }: ExpanderComponentProps<Department>) {
+  return (
+    <div style={{ padding: '12px 32px', background: '#f9fafb' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {dept.members.map(member => (
+          <div key={member.name} style={{ display: 'flex', gap: 12, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px' }}>
+            <div className="avatar">{initials(member.name)}</div>
+            <div style={{ flex: 1 }}>
+              <strong>{member.name}</strong> — {member.role}
+              <UtilBar pct={member.utilization} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+<DataTable
+  columns={columns}
+  data={departments}
+  expandableRows
+  expandableRowsComponent={DepartmentDetail}
+  conditionalRowStyles={conditionalRowStyles}
+/>`} />
+
+  <h2>Expand all / collapse all</h2>
+
+  <p>
+    <code>expandableRowExpanded</code> re-syncs whenever its result changes, so a single boolean
+    in state — flipped by the "Expand all" button above the demo — expands or collapses every
+    department at once:
+  </p>
+
+  <CodeBlock code={`const [allExpanded, setAllExpanded] = useState(false);
+
+<button onClick={() => setAllExpanded(v => !v)}>
+  {allExpanded ? 'Collapse all' : 'Expand all'}
+</button>
+
+<DataTable
+  columns={columns}
+  data={departments}
+  expandableRows
+  expandableRowsComponent={DepartmentDetail}
+  expandableRowExpanded={() => allExpanded}
+/>`} />
+
+  <h2>Inline progress bars in cells</h2>
+
+  <p>
+    Use a <code>cell</code> renderer for columns that need richer content than a plain value.
+    The renderer receives the full row, so you can derive bar width and color from the data:
+  </p>
+
+  <CodeBlock code={`{
+  name: 'Budget spend',
+  cell: r => {
+    const pct = Math.round((r.spent / r.budget) * 100);
+    const color = pct >= 95 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#6366f1';
+    return (
+      <div style={{ width: '100%' }}>
+        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 3 }}>
+          \${r.spent.toLocaleString()} / \${r.budget.toLocaleString()}
+        </div>
+        <div style={{ height: 4, background: '#f3f4f6', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ width: \`\${pct}%\`, background: color, height: '100%' }} />
+        </div>
+      </div>
+    );
+  },
+}`} />
+</DocsLayout>

@@ -1,9 +1,10 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
 import CodeBlock from '../../components/CodeBlock.astro';
+import PropsTable from '../../components/PropsTable.astro';
 ---
 
-<DocsLayout title="Getting started | react-data-table-component">
+<DocsLayout title="Getting started | react-data-table-component" description="Install react-data-table-component and build a sortable, paginated data table in React with 10 lines of code.">
   <h1>Getting started</h1>
 
   <p>
@@ -23,14 +24,14 @@ import CodeBlock from '../../components/CodeBlock.astro';
   <CodeBlock code={`import DataTable from 'react-data-table-component';
 
 const columns = [
-  { name: 'Name',       selector: row => row.name,   sortable: true },
-  { name: 'Role',       selector: row => row.role },
-  { name: 'Salary',     selector: row => row.salary, right: true },
+  { name: 'Name', selector: row => row.name, sortable: true },
+  { name: 'Role', selector: row => row.role },
+  { name: 'Salary', selector: row => row.salary, right: true },
 ];
 
 const data = [
-  { id: 1, name: 'Aria Chen',   role: 'Engineering Lead', salary: 155000 },
-  { id: 2, name: 'Marcus Webb', role: 'Product Manager',  salary: 132000 },
+  { id: 1, name: 'Aria Chen', role: 'Engineering Lead', salary: 155000 },
+  { id: 2, name: 'Marcus Webb', role: 'Product Manager', salary: 132000 },
 ];
 
 export default function App() {
@@ -41,25 +42,10 @@ export default function App() {
 
   <h2>Common props at a glance</h2>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Prop</th>
-        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td><code>columns</code></td><td><code>TableColumn&lt;T&gt;[]</code></td><td>Column definitions (required)</td></tr>
-      <tr><td><code>data</code></td><td><code>T[]</code></td><td>Row data (required)</td></tr>
-      <tr><td><code>pagination</code></td><td><code>boolean</code></td><td>Enable built-in pagination</td></tr>
-      <tr><td><code>selectableRows</code></td><td><code>boolean</code></td><td>Enable row checkboxes</td></tr>
-      <tr><td><code>expandableRows</code></td><td><code>boolean</code></td><td>Enable expandable row panels</td></tr>
-      <tr><td><code>theme</code></td><td><code>string</code></td><td>Named theme (e.g. <code>"slate-dark"</code>)</td></tr>
-      <tr><td><code>animateRows</code></td><td><code>boolean</code></td><td>Staggered row entrance + sort animation</td></tr>
-      <tr><td><code>columnSeparator</code></td><td><code>boolean | "full"</code></td><td>Body column separators (headers always shown)</td></tr>
-    </tbody>
-  </table>
+  <PropsTable
+    only={['columns', 'data', 'pagination', 'selectableRows', 'expandableRows', 'theme', 'animateRows', 'columnSeparator']}
+    columns={['prop', 'type', 'description']}
+  />
 
   <p>See the full <a href="/docs/api">API reference</a> for all props.</p>
 
@@ -74,11 +60,7 @@ export default function App() {
   </p>
 
   <CodeBlock code={`// Your rows use deviceIdentifier instead of id
-<DataTable
-  keyField="deviceIdentifier"
-  columns={columns}
-  data={devices}
-/>`} />
+<DataTable keyField="deviceIdentifier" columns={columns} data={devices} />;`} />
 
   <p>
     For display-only tables (no row selection) this doesn't affect rendering. DataTable falls back
@@ -102,7 +84,7 @@ interface Employee {
 }
 
 const columns: TableColumn<Employee>[] = [
-  { name: 'Name',   selector: row => row.name },
+  { name: 'Name', selector: row => row.name },
   { name: 'Salary', selector: row => row.salary },
 ];`} />
 

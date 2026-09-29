@@ -1,6 +1,7 @@
 ---
 import Layout from './Layout.astro';
 import Demo from '../components/Demo.astro';
+import TableOfContents from '../components/TableOfContents.astro';
 import HeadlessDemo from '../components/demos/HeadlessDemo.tsx';
 
 interface Props {
@@ -14,83 +15,111 @@ const nav = [
   {
     group: 'Introduction',
     links: [
-      { label: 'Getting started', href: '/docs/getting-started' },
+      { label: 'Getting Started', href: '/docs/getting-started' },
       { label: 'Installation', href: '/docs/installation' },
-      { label: "What's new in v8", href: '/docs/whats-new' },
+      { label: 'Comparisons', href: '/docs/comparisons' },
+      { label: 'Changelog', href: '/docs/changelog' },
+      { label: 'llms.txt', href: '/llms.txt' },
+    ],
+  },
+  {
+    group: 'Reference',
+    links: [
+      { label: 'API Reference', href: '/docs/api' },
+      { label: 'Migration Guide', href: '/docs/migration' },
     ],
   },
   {
     group: 'Columns',
     links: [
       { label: 'Overview', href: '/docs/columns' },
-      { label: 'Cell rendering', href: '/docs/cells' },
-      { label: 'Column groups', href: '/docs/column-groups' },
-      { label: 'Column visibility', href: '/docs/column-visibility' },
-      { label: 'Column reordering', href: '/docs/column-reorder' },
-      { label: 'Resizable columns', href: '/docs/resizable' },
-      { label: 'Column pinning', href: '/docs/column-pinning' },
-      { label: 'Column separators', href: '/docs/column-separators' },
-      { label: 'Column filtering', href: '/docs/filtering' },
+      { label: 'Cell Rendering', href: '/docs/cells' },
+      { label: 'Column Groups', href: '/docs/column-groups' },
+      { label: 'Column Visibility', href: '/docs/column-visibility' },
+      { label: 'Column Reordering', href: '/docs/column-reorder' },
+      { label: 'Column Resizing', href: '/docs/resizable' },
+      { label: 'Column Pinning', href: '/docs/column-pinning' },
+      { label: 'Column Separators', href: '/docs/column-separators' },
+      { label: 'Column Filtering', href: '/docs/filtering' },
       { label: 'Sorting', href: '/docs/sorting' },
     ],
   },
   {
     group: 'Editing',
     links: [
-      { label: 'Inline editing', href: '/docs/inline-editing' },
+      { label: 'Inline Editing', href: '/docs/inline-editing' },
     ],
   },
   {
     group: 'Rows',
     links: [
-      { label: 'Row interactions', href: '/docs/row-interactions' },
-      { label: 'Row selection', href: '/docs/selection' },
-      { label: 'Row pinning', href: '/docs/row-pinning' },
-      { label: 'Expandable rows', href: '/docs/expandable' },
-      { label: 'Conditional styles', href: '/docs/conditional-styles' },
-      { label: 'Fixed header', href: '/docs/fixed-header' },
+      { label: 'Row Interactions', href: '/docs/row-interactions' },
+      { label: 'Row Selection', href: '/docs/selection' },
+      { label: 'Row Pinning', href: '/docs/row-pinning' },
+      { label: 'Expandable Rows', href: '/docs/expandable' },
+      { label: 'Conditional Styles', href: '/docs/conditional-styles' },
+      { label: 'Fixed Header', href: '/docs/fixed-header' },
       { label: 'Pagination', href: '/docs/pagination' },
-      { label: 'Loading state', href: '/docs/loading' },
+      { label: 'Footer', href: '/docs/footer' },
+      { label: 'Loading State', href: '/docs/loading' },
     ],
   },
   {
     group: 'Interactivity',
     links: [
       { label: 'Animations', href: '/docs/animations' },
+      { label: 'Accessibility', href: '/docs/accessibility' },
+      { label: 'Keyboard Navigation', href: '/docs/keyboard-navigation' },
+      { label: 'Context Menu', href: '/docs/context-menu' },
+      { label: 'Localization', href: '/docs/localization' },
+      { label: 'RTL Support', href: '/docs/rtl' },
+      { label: 'Mobile', href: '/docs/mobile' },
     ],
   },
   {
     group: 'Styling',
     links: [
       { label: 'Themes', href: '/docs/themes' },
-      { label: 'Custom styles', href: '/docs/custom-styles' },
+      { label: 'Custom Styles', href: '/docs/custom-styles' },
+    ],
+  },
+  {
+    group: 'Import / Export',
+    links: [
+      { label: 'Export (CSV / JSON)', href: '/docs/export' },
     ],
   },
   {
     group: 'Advanced',
     links: [
-      { label: 'Headless hooks', href: '/docs/headless' },
+      { label: 'Headless Hooks', href: '/docs/headless' },
       { label: 'TypeScript', href: '/docs/typescript' },
+      { label: 'SSR', href: '/docs/ssr' },
       { label: 'Performance', href: '/docs/performance' },
-      { label: 'Recipes', href: '/docs/recipes' },
-      { label: 'Accessibility', href: '/docs/accessibility' },
-      { label: 'RTL support', href: '/docs/rtl' },
     ],
   },
   {
-    group: 'Reference',
+    group: 'Recipes',
     links: [
-      { label: 'API reference', href: '/docs/api' },
-      { label: 'Migration guide', href: '/docs/migration' },
-      { label: 'Changelog', href: '/docs/changelog' },
+      { label: 'Approval workflow', href: '/docs/recipes/approval-workflow' },
+      { label: 'Server-side sort & filter', href: '/docs/recipes/server-side' },
+      { label: 'URL-synced table state', href: '/docs/recipes/url-synced-state' },
+      { label: 'Dashboard drill-down', href: '/docs/recipes/dashboard-drilldown' },
+      { label: 'Audit log viewer', href: '/docs/recipes/audit-log' },
+      { label: 'Persist column widths', href: '/docs/recipes/persist-column-widths' },
+      { label: 'Inline row actions', href: '/docs/recipes/inline-row-actions' },
+      { label: 'Live-updating grid', href: '/docs/recipes/live-updates' },
+      { label: 'Editable inventory grid', href: '/docs/recipes/inventory-editor' },
+      { label: 'Grouped rows with aggregates', href: '/docs/recipes/row-groups' },
+      { label: 'CSV import', href: '/docs/recipes/csv-import' },
     ],
   },
 ];
 
 const currentPath = Astro.url.pathname;
 
-// Flatten nav to a single ordered list for prev/next
-const allLinks = nav.flatMap(({ links }) => links);
+// Flatten nav to a single ordered list for prev/next (excludes non-page links like llms.txt)
+const allLinks = nav.flatMap(({ links }) => links).filter(({ href }) => href.startsWith('/docs/'));
 const currentIndex = allLinks.findIndex(({ href }) => currentPath === href);
 const prevLink = currentIndex > 0 ? allLinks[currentIndex - 1] : null;
 const nextLink = currentIndex < allLinks.length - 1 ? allLinks[currentIndex + 1] : null;
@@ -99,25 +128,29 @@ const nextLink = currentIndex < allLinks.length - 1 ? allLinks[currentIndex + 1]
 <Layout title={title} description={description}>
   <div class="max-w-7xl mx-auto px-6 flex gap-12 py-10">
     <!-- Sidebar -->
-    <aside id="docs-sidebar" class="hidden lg:block w-56 shrink-0 sticky top-24 h-[calc(100vh-6rem)] overflow-y-auto">
+    <aside id="docs-sidebar" class="hidden lg:block w-56 shrink-0 sticky top-24 h-[calc(100vh-6rem)] overflow-y-auto" style="visibility: hidden;">
       <nav class="space-y-6 text-sm pb-10">
         <!-- Version switcher -->
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-medium text-gray-700 bg-brand-50 text-brand-700 border border-brand-100 px-2 py-0.5 rounded-full">v8 (current)</span>
-          <a
-            href="https://v7.reactdatatable.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-          >v7 docs ↗</a>
+        <div class="flex items-center gap-2">
+          <label for="rdt-version-switcher" class="sr-only">Documentation version</label>
+          <select
+            id="rdt-version-switcher"
+            class="text-xs font-medium text-brand-700 bg-brand-50 border border-brand-100 rounded-full px-2 py-0.5 pr-6 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-200 appearance-none bg-no-repeat bg-right"
+            style="background-image: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 12 12%22 width=%2210%22 height=%2210%22 fill=%22none%22 stroke=%22%231d4ed8%22 stroke-width=%221.5%22><path d=%22M3 4.5l3 3 3-3%22/></svg>'); background-position: right 6px center;"
+            onchange="if (this.value && this.value !== 'current') { window.location.href = this.value; }"
+          >
+            <option value="current">v8 (current)</option>
+            <option value="https://v7.reactdatatable.com">v7</option>
+          </select>
         </div>
         <a
-          href="https://github.com/sponsors/jbetancur"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-pink-500 transition-colors"
+          href="/support"
+          class="block rounded-lg border border-pink-100 bg-pink-50 px-3 py-2.5 hover:border-pink-200 hover:bg-pink-100 transition-colors"
         >
-          <span>♥</span> Sponsor this project
+          <div class="flex items-center gap-1.5 text-xs font-semibold text-pink-600">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 13.7c-.3 0-.6-.1-.8-.3L1.6 7.8C.6 6.8.1 5.5.1 4.1.1 1.8 2 0 4.3 0c1.2 0 2.3.5 3.1 1.3L8 1.9l.6-.6C9.4.5 10.5 0 11.7 0 14 0 15.9 1.8 15.9 4.1c0 1.4-.5 2.7-1.5 3.7l-5.6 5.6c-.2.2-.5.3-.8.3z"/></svg>
+            Sponsor this project
+          </div>
         </a>
 
         {nav.map(({ group, links }) => (
@@ -203,10 +236,11 @@ function HeadlessTable({ data }: { data: Employee[] }) {
             {tableColumns.map(col => (
               <th key={col.id}
                 onClick={() => col.sortable && handleSort({
-                  type: 'SORT_CHANGE', sortColumn: col,
-                  sortDirection: selectedColumn?.id === col.id && sortDirection === SortOrder.ASC
+                  type: 'SORT_CHANGE', selectedColumn: col,
+                  additive: false, defaultSortDirection: SortOrder.ASC,
+                  direction: selectedColumn?.id === col.id && sortDirection === SortOrder.ASC
                     ? SortOrder.DESC : SortOrder.ASC,
-                  clearSelectedRows: false,
+                  clearSelectedOnSort: false,
                 })}
               >
                 {col.name}
@@ -260,21 +294,23 @@ function HeadlessTable({ data }: { data: Employee[] }) {
         </nav>
       )}
     </article>
+
+    <TableOfContents />
   </div>
 </Layout>
 
-<script>
-  const SIDEBAR_SCROLL_KEY = 'docs-sidebar-scroll';
-  const sidebar = document.getElementById('docs-sidebar');
+<script is:inline>
+  (function() {
+    var el = document.getElementById('docs-sidebar');
+    if (!el) return;
+    var saved = sessionStorage.getItem('docs-sidebar-scroll');
+    if (saved !== null) el.scrollTop = parseInt(saved, 10);
+    el.style.visibility = '';
 
-  // Restore scroll position before the browser paints to avoid flicker
-  if (sidebar) {
-    const saved = sessionStorage.getItem(SIDEBAR_SCROLL_KEY);
-    if (saved !== null) sidebar.scrollTop = parseInt(saved, 10);
-  }
-
-  // Save scroll position on every navigation away from this page
-  window.addEventListener('beforeunload', () => {
-    if (sidebar) sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(sidebar.scrollTop));
-  });
+    el.querySelectorAll('a').forEach(function(a) {
+      a.addEventListener('click', function() {
+        sessionStorage.setItem('docs-sidebar-scroll', String(el.scrollTop));
+      });
+    });
+  })();
 </script>

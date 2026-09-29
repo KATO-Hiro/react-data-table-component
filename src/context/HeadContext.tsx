@@ -1,55 +1,41 @@
 import * as React from 'react';
-import { SortOrder } from '../types';
-import type { TableColumn, SortAction, AllRowsAction, RowState, ComponentProps, FilterState } from '../types';
+import type { FilteringSlice } from '../hooks/useColumnFilter';
 import type { PinnedOffsets } from '../util';
+import type { ActiveCell } from './RowContext';
+import type { HeaderMenuSlice } from '../hooks/useContextMenu';
+import type { ColumnDragSlice } from '../hooks/useColumns';
+import type { ResizeSlice } from '../hooks/useColumnResize';
+import type { SelectAllSlice } from '../hooks/useSelection';
+import type { SortingSlice } from '../hooks/useSorting';
 
 export interface HeadContextValue<T> {
-	// Sort state
-	selectedColumn: TableColumn<T>;
-	sortDirection: SortOrder;
-	sortIcon?: React.ReactNode;
-	sortServer: boolean;
-	// Pagination config (affects sort-reset behaviour)
-	pagination: boolean;
-	paginationServer: boolean;
-	persistSelectedOnSort: boolean;
-	// Selection config
-	selectableRowsVisibleOnly: boolean;
-	keyField: string;
-	mergeSelections: boolean;
-	allSelected: boolean;
-	selectedRows: T[];
-	visibleRows: T[];
-	selectableRowsComponent: 'input' | React.ComponentType<React.InputHTMLAttributes<HTMLInputElement>>;
-	selectableRowsComponentProps: ComponentProps;
-	selectableRowDisabled: RowState<T>;
-	showSelectAll: boolean;
-	// Column resize / drag
+	tableId: string;
+	/** Sorting feature slice — `sortColumns` inside it changes identity per sort
+	 *  interaction; TableCol's memo does per-column checks within the slice. */
+	sorting: SortingSlice<T>;
+	/** Select-all feature slice — `null` when selectableRows is off. Carries the
+	 *  selection state the header checkbox renders from, so its identity changes
+	 *  with the selection (legitimate re-render). */
+	selectAll: SelectAllSlice<T>;
+	// Volatile column-drag state — stays flat so the columnDrag slice stays stable (invariant 4)
 	draggingColumnId: string | number;
 	draggingGroupKey: string;
-	filterValues: Record<string | number, FilterState>;
+	/** Column-filter feature slice — `filterValues` inside it changes per applied filter. */
+	filtering: FilteringSlice;
 	columnWidths: Record<string | number, number>;
 	pinnedOffsets: PinnedOffsets;
-	resizable: boolean;
-	// Table state
-	progressPending: boolean;
-	sortedData: T[];
+	/** Column-resize feature slice — `null` when `resizable` is off. */
+	resize: ResizeSlice;
+	// Cell navigation (row -1 of the nav grid is the header row)
+	cellNavigation: boolean;
+	activeCell: ActiveCell | null;
+	/** Header context-menu feature slice — `null` when the feature is off. Compared by
+	 *  reference in the memo dep list and TableCol's memo; useContextMenu owns identity stability. */
+	headerMenu: HeaderMenuSlice<T>;
 	fixedHeader: boolean;
 	dense: boolean;
-	// Callbacks
-	onSelectAllRows: (action: AllRowsAction<T>) => void;
-	onSort: (action: SortAction<T>) => void;
-	onFilterChange: (columnId: string | number, filter: FilterState) => void;
-	onResizeStart?: (columnId: string | number, e: React.MouseEvent) => void;
-	onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragEnter: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragLeave: (e: React.DragEvent<HTMLDivElement>) => void;
-	onGroupDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
-	onGroupDragEnter: (e: React.DragEvent<HTMLDivElement>) => void;
-	onGroupDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
-	onGroupDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
+	/** Column drag/reorder feature slice — shared with RowContext. */
+	columnDrag: ColumnDragSlice;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,7 +43,9 @@ const HeadContext = React.createContext<HeadContextValue<any> | null>(null);
 
 export function useHeadContext<T>(): HeadContextValue<T> {
 	const ctx = React.useContext(HeadContext);
-	if (!ctx) throw new Error('useHeadContext must be used inside DataTable');
+	if (!ctx) {
+		throw new Error('useHeadContext must be used inside DataTable');
+	}
 	return ctx as HeadContextValue<T>;
 }
 

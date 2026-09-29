@@ -3,6 +3,8 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import Demo from '../../components/Demo.astro';
 import CodeBlock from '../../components/CodeBlock.astro';
 import InlineEditingDemo from '../../components/demos/InlineEditingDemo.tsx';
+import ServerSideEditDemo from '../../components/demos/ServerSideEditDemo.tsx';
+import DocsTable from '../../components/DocsTable.astro';
 ---
 
 <DocsLayout title="Inline editing | react-data-table-component">
@@ -15,14 +17,16 @@ import InlineEditingDemo from '../../components/demos/InlineEditingDemo.tsx';
   </p>
 
   <p>
-    Two editor types are built in: a text input (<code>editable: true</code> as shorthand) and
-    a dropdown (<code>editor: &#123; type: 'select', options &#125;</code>). The cell itself
-    becomes the editor: full-bleed input, primary-color focus ring, no nested borders.
+    Six editor types are built in: <code>text</code>, <code>number</code>, <code>date</code>,
+    <code>checkbox</code>, <code>select</code>, and <code>custom</code>. The cell itself becomes
+    the editor: full-bleed input, primary-color focus ring, no nested borders. Add a
+    <code>validate</code> function on any column to reject invalid input or surface an inline
+    error message.
   </p>
 
   <Demo
     title="Editable cells — text + dropdown"
-    description="Name and Salary use text inputs. Department and Status use dropdowns. Click any cell to edit."
+    description="Name and Salary use text inputs with validation. Department and Status use dropdowns. Click any cell to edit."
     code={`import { useState } from 'react';
 import DataTable, { type TableColumn } from 'react-data-table-component';
 
@@ -40,47 +44,67 @@ export default function App() {
   const handleCellEdit = (row: Employee, value: string, column: TableColumn<Employee>) => {
     const field = column.id as keyof Employee;
     setData(prev =>
-      prev.map(r =>
-        r.id === row.id
-          ? { ...r, [field]: field === 'salary' ? Number(value) || r.salary : value }
-          : r,
-      ),
+      prev.map(r => (r.id === row.id ? { ...r, [field]: field === 'salary' ? Number(value) : value } : r)),
     );
   };
 
   const columns: TableColumn<Employee>[] = [
     // Text editor — editable: true is shorthand for { editor: { type: 'text' } }
-    { id: 'name', name: 'Name', selector: r => r.name,
-      editable: true, onCellEdit: handleCellEdit },
+    {
+      id: 'name',
+      name: 'Name',
+      selector: r => r.name,
+      editable: true,
+      validate: value => (value.trim() === '' ? 'Name is required' : true),
+      onCellEdit: handleCellEdit,
+    },
 
     // Dropdown editor
-    { id: 'department', name: 'Department', selector: r => r.department,
+    {
+      id: 'department',
+      name: 'Department',
+      selector: r => r.department,
       editor: {
         type: 'select',
         options: [
           { value: 'Engineering', label: 'Engineering' },
-          { value: 'Product',     label: 'Product' },
-          { value: 'Design',      label: 'Design' },
+          { value: 'Product', label: 'Product' },
+          { value: 'Design', label: 'Design' },
         ],
       },
-      onCellEdit: handleCellEdit },
+      onCellEdit: handleCellEdit,
+    },
 
     // Custom cell renderer + dropdown editor compose freely
-    { id: 'status', name: 'Status', selector: r => r.status,
+    {
+      id: 'status',
+      name: 'Status',
+      selector: r => r.status,
       cell: row => <StatusBadge status={row.status} />,
       editor: {
         type: 'select',
         options: [
-          { value: 'Active',     label: 'Active' },
-          { value: 'On Leave',   label: 'On Leave' },
+          { value: 'Active', label: 'Active' },
+          { value: 'On Leave', label: 'On Leave' },
           { value: 'Terminated', label: 'Terminated' },
         ],
       },
-      onCellEdit: handleCellEdit },
+      onCellEdit: handleCellEdit,
+    },
 
-    { id: 'salary', name: 'Salary', selector: r => r.salary,
+    {
+      id: 'salary',
+      name: 'Salary',
+      selector: r => r.salary,
       format: r => \`$\${r.salary.toLocaleString()}\`,
-      right: true, editable: true, onCellEdit: handleCellEdit },
+      right: true,
+      editable: true,
+      validate: value => {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? true : 'Enter a positive number';
+      },
+      onCellEdit: handleCellEdit,
+    },
   ];
 
   return <DataTable columns={columns} data={data} />;
@@ -102,6 +126,12 @@ export default function App() {
 
   <h2>Editor types</h2>
 
+  <p>
+    Pick the right editor for the value type. Every editor calls <code>onCellEdit(row, value, column)</code>
+    with the new value as a <strong>string</strong> — you parse it into a number, boolean, or
+    date in your update handler.
+  </p>
+
   <h3>Text input</h3>
   <p>
     The default. <code>editable: true</code> is shorthand for
@@ -117,6 +147,44 @@ export default function App() {
   editor: { type: 'text', placeholder: 'Enter a name…' },
   onCellEdit }`} />
 
+  <h3>Number input</h3>
+  <p>
+    A native <code>type="number"</code> field with optional <code>min</code>, <code>max</code>,
+    and <code>step</code>:
+  </p>
+
+  <CodeBlock code={`{
+  id: 'salary', name: 'Salary', selector: r => r.salary,
+  editor: { type: 'number', min: 0, step: 1000 },
+  onCellEdit, // value arrives as a string — Number(value) it on commit
+}`} />
+
+  <h3>Date picker</h3>
+  <p>
+    A native <code>type="date"</code> field. Values arrive in ISO <code>YYYY-MM-DD</code> form:
+  </p>
+
+  <CodeBlock code={`{
+  id: 'joined', name: 'Joined', selector: r => r.joined,
+  editor: { type: 'date', min: '2020-01-01' },
+  onCellEdit,
+}`} />
+
+  <h3>Checkbox</h3>
+  <p>
+    A toggle that commits immediately on click. The selector should return a boolean (or a
+    string <code>'true'</code> / <code>'false'</code>). The callback receives the
+    <em>new</em> string value:
+  </p>
+
+  <CodeBlock code={`{
+  id: 'active', name: 'Active', selector: r => r.active,
+  editor: { type: 'checkbox' },
+  onCellEdit: (row, value) => {
+    setData(prev => prev.map(r => r.id === row.id ? { ...r, active: value === 'true' } : r));
+  },
+}`} />
+
   <h3>Dropdown (select)</h3>
   <p>
     Provide a list of <code>&#123; value, label &#125;</code> options. The select commits the
@@ -129,7 +197,7 @@ export default function App() {
   editor: {
     type: 'select',
     options: [
-      { value: 'active',  label: 'Active' },
+      { value: 'active', label: 'Active' },
       { value: 'on_leave', label: 'On Leave' },
       { value: 'terminated', label: 'Terminated' },
     ],
@@ -144,6 +212,48 @@ export default function App() {
     inside <code>&lt;option&gt;</code> elements).
   </p>
 
+  <h3>Custom editor</h3>
+  <p>
+    Render any editor you want and call <code>ctx.commit(value)</code> when ready or
+    <code>ctx.cancel()</code> to discard. The context also exposes <code>value</code> /
+    <code>setValue</code> so you can wire up controlled inputs:
+  </p>
+
+  <CodeBlock code={`{
+  id: 'role', name: 'Role', selector: r => r.role,
+  editor: {
+    type: 'custom',
+    render: ({ value, setValue, commit, cancel, row, inputRef }) => (
+      <Autocomplete
+        ref={inputRef}
+        value={value}
+        onChange={setValue}
+        onSelect={v => commit(v)}
+        onBlur={() => commit()}
+        onEscape={cancel}
+      />
+    ),
+  },
+  onCellEdit,
+}`} />
+
+  <p>
+    The <code>ctx.row</code> field gives you the row data for context-aware editors
+    (dependent dropdowns, etc.). The cell wrapper still owns padding and the focus ring —
+    your custom editor only needs to render the input.
+  </p>
+
+  <p>
+    Validation works the same as for built-in editors: <code>ctx.commit</code> runs the
+    column's <code>validate</code> first, and a string result keeps the editor open with the
+    inline error tooltip. Since 8.7.0 the render context also carries the current error as
+    <code>ctx.error</code> (<code>string | null</code>), so your editor can style its own
+    invalid state, e.g. <code>aria-invalid=&#123;!!ctx.error&#125;</code>. Attach
+    <code>ctx.inputRef</code> as the <code>ref</code> of your focusable element to get the
+    same focus handling as the built-in editors: auto-focus when the editor opens and
+    refocus after a rejected commit.
+  </p>
+
   <h2>The cell becomes the editor</h2>
 
   <p>
@@ -155,29 +265,17 @@ export default function App() {
 
   <h3>Customizable variables</h3>
 
-  <table>
-    <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
-    <tbody>
-      <tr>
-        <td><code>--rdt-color-cell-edit-bg</code></td>
-        <td>8% primary on bg</td>
-        <td>Background of the cell while editing.</td>
-      </tr>
-      <tr>
-        <td><code>--rdt-color-cell-edit-hover</code></td>
-        <td>6% primary</td>
-        <td>Background of an editable cell on hover.</td>
-      </tr>
-      <tr>
-        <td><code>--rdt-color-cell-edit-hover-border</code></td>
-        <td>40% primary</td>
-        <td>Color of the dashed underline that hints "this cell is editable" on hover.</td>
-      </tr>
-    </tbody>
-  </table>
+  <DocsTable
+    headers={['Variable', 'Default', 'Purpose']}
+    rows={[
+      ['<code>--rdt-color-cell-edit-bg</code>', '8% primary on bg', 'Background of the cell while editing.'],
+      ['<code>--rdt-color-cell-edit-hover</code>', '6% primary', 'Background of an editable cell on hover.'],
+      ['<code>--rdt-color-cell-edit-hover-border</code>', '40% primary', 'Color of the dashed underline that hints "this cell is editable" on hover.'],
+    ]}
+  />
 
   <CodeBlock code={`.rdt_table {
-  --rdt-color-cell-edit-bg: #fff7ed;        /* warm amber */
+  --rdt-color-cell-edit-bg: #fff7ed; /* warm amber */
   --rdt-color-cell-edit-hover: #fffbeb;
   --rdt-color-cell-edit-hover-border: #f59e0b;
 }`} lang="css" />
@@ -190,9 +288,7 @@ export default function App() {
   </p>
 
   <CodeBlock code={`const handleCellEdit = (row, value, column) => {
-  setData(prev =>
-    prev.map(r => (r.id === row.id ? { ...r, [column.id as string]: value } : r))
-  );
+  setData(prev => prev.map(r => (r.id === row.id ? { ...r, [column.id as string]: value } : r)));
 };`} />
 
   <p>
@@ -202,37 +298,102 @@ export default function App() {
 
   <CodeBlock code={`const handleCellEdit = async (row, value, column) => {
   // Optimistic update
-  setData(prev =>
-    prev.map(r => (r.id === row.id ? { ...r, [column.id as string]: value } : r))
-  );
+  setData(prev => prev.map(r => (r.id === row.id ? { ...r, [column.id as string]: value } : r)));
 
   try {
     await api.updateEmployee(row.id, { [column.id as string]: value });
   } catch (err) {
     // Roll back on failure
     setData(prev =>
-      prev.map(r => (r.id === row.id ? { ...r, [column.id as string]: row[column.id as keyof typeof row] } : r))
+      prev.map(r => (r.id === row.id ? { ...r, [column.id as string]: row[column.id as keyof typeof row] } : r)),
     );
     console.error('Save failed:', err);
   }
 };`} />
 
+  <Demo
+    title="Server-side saves — optimistic update with rollback"
+    description="Edits apply immediately and save to a simulated server. Failed saves roll back. The server rejects prices over $1,000."
+    code={`import { useState } from 'react';
+import DataTable, { type TableColumn } from 'react-data-table-component';
+
+export default function App() {
+  const [data, setData] = useState<Product[]>(initialData);
+  const [savingId, setSavingId] = useState<number | null>(null);
+
+  const handleCellEdit = async (row: Product, value: string, column: TableColumn<Product>) => {
+    const field = column.id as keyof Product;
+    const parsed = field === 'name' ? value : Number(value);
+
+    // Optimistic update
+    setData(prev => prev.map(r => (r.id === row.id ? { ...r, [field]: parsed } : r)));
+    setSavingId(row.id);
+
+    try {
+      await api.updateProduct(row.id, { [field]: parsed });
+    } catch (err) {
+      // Roll back the field to its pre-edit value
+      setData(prev => prev.map(r => (r.id === row.id ? { ...r, [field]: row[field] } : r)));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const columns: TableColumn<Product>[] = [
+    { id: 'sku', name: 'SKU', selector: r => r.sku },
+    { id: 'name', name: 'Product', selector: r => r.name, editable: true, onCellEdit: handleCellEdit },
+    {
+      id: 'price',
+      name: 'Price',
+      selector: r => r.price,
+      right: true,
+      editor: { type: 'number', min: 0 },
+      validate: value => (Number(value) > 0 ? true : 'Enter a positive number'),
+      onCellEdit: handleCellEdit,
+    },
+  ];
+
+  return (
+    <DataTable
+      columns={columns}
+      data={data}
+      conditionalRowStyles={[{ when: r => r.id === savingId, style: { opacity: 0.45 } }]}
+    />
+  );
+}`}
+  >
+    <ServerSideEditDemo client:load />
+  </Demo>
+
   <h2>Validation</h2>
   <p>
-    Reject invalid input by checking inside <code>onCellEdit</code> and skipping the update.
-    The cell input doesn't expose a "reject and re-open" hook, so the simplest pattern is to
-    no-op and rely on the user re-clicking the cell.
+    Add a <code>validate</code> function to any column to gate the edit before
+    <code>onCellEdit</code> fires. Return:
   </p>
+  <ul>
+    <li><code>true</code> — accept the value, commit the edit.</li>
+    <li><code>false</code> — reject silently, close the editor without firing the callback.</li>
+    <li>A <code>string</code> — keep the editor open, paint an error ring, and show the message as an inline tooltip.</li>
+  </ul>
 
-  <CodeBlock code={`const handleCellEdit = (row, value, column) => {
-  if (column.id === 'salary') {
+  <CodeBlock code={`{
+  id: 'salary', name: 'Salary', selector: r => r.salary,
+  editor: { type: 'number', min: 0 },
+  validate: (value) => {
     const n = Number(value);
-    if (isNaN(n) || n < 0) return; // ignore invalid input
-    setData(prev => prev.map(r => r.id === row.id ? { ...r, salary: n } : r));
-    return;
-  }
-  setData(prev => prev.map(r => r.id === row.id ? { ...r, [column.id]: value } : r));
-};`} />
+    if (Number.isNaN(n)) return 'Must be a number';
+    if (n < 0) return 'Cannot be negative';
+    if (n > 1_000_000) return false; // silently reject
+    return true;
+  },
+  onCellEdit,
+}`} />
+
+  <p>
+    The error state uses CSS variables you can theme:
+    <code>--rdt-color-cell-edit-error</code> drives both the error ring and the tooltip
+    background.
+  </p>
 
   <h2>Restricting which columns are editable</h2>
   <p>
@@ -244,9 +405,8 @@ export default function App() {
   <CodeBlock code={`const canEdit = user.role === 'admin';
 
 const columns: TableColumn<Employee>[] = [
-  { id: 'name',   name: 'Name',   selector: r => r.name },               // never editable
-  { id: 'salary', name: 'Salary', selector: r => r.salary,
-    editable: canEdit, onCellEdit: handleCellEdit },                     // editable only for admins
+  { id: 'name', name: 'Name', selector: r => r.name }, // never editable
+  { id: 'salary', name: 'Salary', selector: r => r.salary, editable: canEdit, onCellEdit: handleCellEdit }, // editable only for admins
 ];`} />
 
   <h2>Combining with custom cell renderers</h2>
@@ -254,7 +414,7 @@ const columns: TableColumn<Employee>[] = [
     A column can have both a custom <code>cell</code> renderer <strong>and</strong> an
     <code>editor</code>. The cell renderer is used for display; clicking the cell switches to
     the inline editor. This is the pattern shown in the demo above. Status renders as a
-    coloured badge but edits as a dropdown.
+    colored badge but edits as a dropdown.
   </p>
 
   <CodeBlock code={`{
@@ -263,8 +423,8 @@ const columns: TableColumn<Employee>[] = [
   editor: {
     type: 'select',
     options: [
-      { value: 'Active',     label: 'Active' },
-      { value: 'On Leave',   label: 'On Leave' },
+      { value: 'Active', label: 'Active' },
+      { value: 'On Leave', label: 'On Leave' },
       { value: 'Terminated', label: 'Terminated' },
     ],
   },
@@ -314,47 +474,71 @@ const columns: TableColumn<Employee>[] = [
   box-shadow: inset 0 0 0 3px var(--rdt-color-primary);
 }`} lang="css" />
 
+  <h2>Keyboard cell navigation</h2>
+
+  <p>
+    Pass <code>cellNavigation</code> to navigate the whole table with the keyboard, spreadsheet-style —
+    arrow keys between cells, <kbd>Enter</kbd>/<kbd>F2</kbd> to open the focused cell's editor, and
+    <kbd>Escape</kbd> to cancel and return focus to the cell. See
+    <a href="/docs/keyboard-navigation">Keyboard navigation</a> for the full key reference; it also
+    covers header, selection, and expander cells, and works on read-only tables.
+  </p>
+
+  <CodeBlock code={`<DataTable columns={columns} data={data} cellNavigation />;`} />
+
   <h2>Limitations</h2>
   <ul>
-    <li>Built-in editors are text and select only. For multi-line text, date pickers, autocompletes, or rich validation, render your own <code>cell</code> (see above).</li>
-    <li>The <code>value</code> passed to <code>onCellEdit</code> is always a string. Parse it yourself.</li>
+    <li>Built-in editors cover text, number, date, checkbox, and select. For autocomplete, multi-line text, rich pickers, etc. use the <code>custom</code> editor.</li>
+    <li>The <code>value</code> passed to <code>onCellEdit</code> and <code>validate</code> is always a string. Parse it yourself.</li>
     <li>Dropdown <code>label</code>s must be strings or numbers. They render inside native <code>&lt;option&gt;</code> elements which can't contain arbitrary React content.</li>
     <li>There is no built-in "dirty" indicator or undo stack. Track that in your application state if you need it.</li>
     <li>Editing does not trigger row selection or row click handlers. Clicks inside the editor are stopped from propagating.</li>
   </ul>
 
-  <h2>Prop reference</h2>
+  <h2 id="celleditor">CellEditor</h2>
 
-  <table>
-    <thead>
-      <tr><th>Column prop</th><th>Type</th><th>Description</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>editable</code></td>
-        <td><code>boolean</code></td>
-        <td>Shorthand for a text editor. Equivalent to <code>editor: &#123; type: 'text' &#125;</code>. Ignored when <code>editor</code> is set.</td>
-      </tr>
-      <tr>
-        <td><code>editor</code></td>
-        <td><code>CellEditor</code></td>
-        <td>Editor configuration. Either <code>&#123; type: 'text', placeholder? &#125;</code> or <code>&#123; type: 'select', options, placeholder? &#125;</code>.</td>
-      </tr>
-      <tr>
-        <td><code>onCellEdit</code></td>
-        <td><code>(row: T, value: string, column: TableColumn&lt;T&gt;) =&gt; void</code></td>
-        <td>Called when the user commits an edit (<kbd>Enter</kbd>, blur, or selection change for dropdowns). Receives the original row, the new string value, and the column definition.</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <h3>CellEditor</h3>
-
-  <CodeBlock code={`type CellEditor =
+  <CodeBlock code={`type CellEditor<T = unknown> =
   | { type: 'text'; placeholder?: string }
+  | { type: 'number'; placeholder?: string; min?: number; max?: number; step?: number }
+  | { type: 'date'; min?: string; max?: string }
+  | { type: 'checkbox' }
   | {
       type: 'select';
       options: Array<{ value: string; label: React.ReactNode }>;
       placeholder?: string;
-    };`} />
+    }
+  | {
+      type: 'custom';
+      render: (ctx: CustomCellEditorContext<T>) => React.ReactNode;
+    };
+
+interface CustomCellEditorContext<T> {
+  row: T;
+  value: string;
+  setValue: (next: string) => void;
+  commit: (value?: string) => void;
+  cancel: () => void;
+  column: TableColumn<T>;
+}`} />
+
+  <p>
+    See it combined with other features in the <a href="/docs/recipes/inventory-editor">Editable inventory grid</a> recipe.
+  </p>
+
+  <h2>Prop reference</h2>
+
+  <DocsTable
+    headers={['Column prop', 'Type', 'Description']}
+    rows={[
+      ['<code>editable</code>', '<code>boolean</code>', 'Shorthand for a text editor. Equivalent to <code>editor: &#123; type: \'text\' &#125;</code>. Ignored when <code>editor</code> is set.'],
+      ['<code>editor</code>', '<code>CellEditor</code>', 'Editor configuration. See <a href="#celleditor">CellEditor</a> above for the full union.'],
+      ['<code>validate</code>', '<code>(value, row, column) =&gt; true | false | string</code>', 'Runs before <code>onCellEdit</code>. Return <code>true</code> to accept, <code>false</code> to reject silently, or a string to keep the editor open with an inline error.'],
+      ['<code>onCellEdit</code>', '<code>(row: T, value: string, column: TableColumn&lt;T&gt;) =&gt; void</code>', 'Called when the user commits an edit (<kbd>Enter</kbd>, blur, or selection change for dropdowns). Receives the original row, the new string value, and the column definition.'],
+    ]}
+  />
+
+  <p>
+    <code>cellNavigation</code> is a table-level prop covered on its own page — see
+    <a href="/docs/keyboard-navigation">Keyboard navigation</a>.
+  </p>
 </DocsLayout>

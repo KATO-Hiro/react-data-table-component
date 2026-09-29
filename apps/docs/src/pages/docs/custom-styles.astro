@@ -3,6 +3,8 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import Demo from '../../components/Demo.astro';
 import CodeBlock from '../../components/CodeBlock.astro';
 import CustomStylesDemo from '../../components/demos/CustomStylesDemo.tsx';
+import DocsTable from '../../components/DocsTable.astro';
+import PropsTable from '../../components/PropsTable.astro';
 ---
 
 <DocsLayout title="Custom styles | react-data-table-component">
@@ -27,26 +29,38 @@ interface Employee {
 }
 
 const data: Employee[] = [
-  { id: 1, name: 'Aria Chen',     department: 'Engineering', salary: 155000, active: true  },
-  { id: 2, name: 'Marcus Webb',   department: 'Product',     salary: 132000, active: true  },
-  { id: 3, name: 'Priya Kapoor',  department: 'Design',      salary: 118000, active: false },
-  { id: 4, name: 'Jordan Ellis',  department: 'Analytics',   salary: 143000, active: true  },
-  { id: 5, name: 'Sam Rivera',    department: 'Engineering', salary: 128000, active: false },
-  { id: 6, name: 'Taylor Brooks', department: 'Sales',       salary:  97000, active: true  },
+  { id: 1, name: 'Aria Chen', department: 'Engineering', salary: 155000, active: true },
+  { id: 2, name: 'Marcus Webb', department: 'Product', salary: 132000, active: true },
+  { id: 3, name: 'Priya Kapoor', department: 'Design', salary: 118000, active: false },
+  { id: 4, name: 'Jordan Ellis', department: 'Analytics', salary: 143000, active: true },
+  { id: 5, name: 'Sam Rivera', department: 'Engineering', salary: 128000, active: false },
+  { id: 6, name: 'Taylor Brooks', department: 'Sales', salary: 97000, active: true },
 ];
 
 const columns: TableColumn<Employee>[] = [
-  { name: 'Name',       selector: r => r.name,       sortable: true },
+  { name: 'Name', selector: r => r.name, sortable: true },
   { name: 'Department', selector: r => r.department, sortable: true },
-  { name: 'Salary',     selector: r => r.salary,     sortable: true,
-    format: r => \`$\${r.salary.toLocaleString()}\`, right: true },
+  {
+    name: 'Salary',
+    selector: r => r.salary,
+    sortable: true,
+    format: r => \`$\${r.salary.toLocaleString()}\`,
+    right: true,
+  },
   {
     name: 'Status',
     selector: r => r.active,
     cell: r => (
-      <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
-        background: r.active ? '#dcfce7' : '#f3f4f6',
-        color: r.active ? '#15803d' : '#6b7280' }}>
+      <span
+        style={{
+          padding: '2px 8px',
+          borderRadius: 12,
+          fontSize: 11,
+          fontWeight: 600,
+          background: r.active ? '#dcfce7' : '#f3f4f6',
+          color: r.active ? '#15803d' : '#6b7280',
+        }}
+      >
         {r.active ? 'Active' : 'Inactive'}
       </span>
     ),
@@ -126,33 +140,31 @@ const customStyles: TableStyles = {
   },
 };
 
-<DataTable columns={columns} data={data} customStyles={customStyles} />`} />
+<DataTable columns={columns} data={data} customStyles={customStyles} />;`} />
 
   <h2>Available style targets</h2>
 
-  <table>
-    <thead>
-      <tr><th>Key</th><th>Description</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>table</code></td><td>The root <code>&lt;div&gt;</code> wrapping the table</td></tr>
-      <tr><td><code>tableWrapper</code></td><td>Inner wrapper for overflow handling</td></tr>
-      <tr><td><code>responsiveWrapper</code></td><td>Horizontal scroll container</td></tr>
-      <tr><td><code>header</code></td><td>Title bar above the table</td></tr>
-      <tr><td><code>subHeader</code></td><td>Sub-header area (search, actions)</td></tr>
-      <tr><td><code>head</code></td><td>Column header area</td></tr>
-      <tr><td><code>headRow</code></td><td>Column header row</td></tr>
-      <tr><td><code>headCells</code></td><td>Column header cells</td></tr>
-      <tr><td><code>cells</code></td><td>Body cells</td></tr>
-      <tr><td><code>rows</code></td><td>Body rows (includes <code>selectedHighlightStyle</code>)</td></tr>
-      <tr><td><code>expanderRow</code></td><td>Expanded row container</td></tr>
-      <tr><td><code>expanderCell</code></td><td>Expander toggle cell</td></tr>
-      <tr><td><code>expanderButton</code></td><td>Expand/collapse button icon</td></tr>
-      <tr><td><code>pagination</code></td><td>Pagination bar</td></tr>
-      <tr><td><code>noData</code></td><td>Empty-state container</td></tr>
-      <tr><td><code>progress</code></td><td>Loading state container</td></tr>
-    </tbody>
-  </table>
+  <DocsTable
+    headers={['Key', 'Description']}
+    rows={[
+      ['<code>table</code>', 'The root <code>&lt;div&gt;</code> wrapping the table'],
+      ['<code>tableWrapper</code>', 'Inner wrapper for overflow handling'],
+      ['<code>responsiveWrapper</code>', 'Horizontal scroll container'],
+      ['<code>header</code>', 'Title bar above the table'],
+      ['<code>subHeader</code>', 'Sub-header area (search, actions)'],
+      ['<code>head</code>', 'Column header area'],
+      ['<code>headRow</code>', 'Column header row'],
+      ['<code>headCells</code>', 'Column header cells'],
+      ['<code>cells</code>', 'Body cells'],
+      ['<code>rows</code>', 'Body rows (includes <code>selectedHighlightStyle</code>)'],
+      ['<code>expanderRow</code>', 'Expanded row container'],
+      ['<code>expanderCell</code>', 'Expander toggle cell'],
+      ['<code>expanderButton</code>', 'Expand/collapse button icon'],
+      ['<code>pagination</code>', 'Pagination bar'],
+      ['<code>noData</code>', 'Empty-state container'],
+      ['<code>progress</code>', 'Loading state container'],
+    ]}
+  />
 
   <h2>Conditional row styles</h2>
 
@@ -179,11 +191,7 @@ const conditionalRowStyles: ConditionalStyles<Employee>[] = [
   },
 ];
 
-<DataTable
-  columns={columns}
-  data={data}
-  conditionalRowStyles={conditionalRowStyles}
-/>`} />
+<DataTable columns={columns} data={data} conditionalRowStyles={conditionalRowStyles} />;`} />
 
   <h2>CSS custom properties</h2>
 
@@ -204,5 +212,14 @@ const conditionalRowStyles: ConditionalStyles<Employee>[] = [
     In v8, they accept <code>React.CSSProperties</code>. The practical difference:
     pseudo-selectors like <code>&amp;:hover</code> are not valid here.
     Use <code>conditionalRowStyles</code> or CSS classes for hover and focus states.
+  </p>
+
+  <h2>Prop reference</h2>
+
+  <PropsTable only={['customStyles', 'conditionalRowStyles']} columns={['prop', 'type', 'default', 'description']} />
+
+  <p>
+    <code>customStyles</code> takes a <a href="/docs/api#tablestyles"><code>TableStyles</code></a> object —
+    see the API reference for every styleable slot.
   </p>
 </DocsLayout>

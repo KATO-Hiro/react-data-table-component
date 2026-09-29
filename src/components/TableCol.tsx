@@ -3,66 +3,101 @@ import '../DataTable.css';
 import { useStyles } from '../context/StylesContext';
 import { CellExtended } from './Cell';
 import NativeSortIcon from '../icons/NativeSortIcon';
+import MenuIcon from '../icons/MenuIcon';
 import ColumnFilter from './ColumnFilter';
 import { equalizeId, getPinnedCellMeta } from '../util';
 import type { PinnedOffsets } from '../util';
+import { setDragGhost } from '../dom';
 import { SortOrder } from '../types';
-import type { TableColumn, SortAction, FilterState } from '../types';
+import type { TableColumn, FilterState, Localization } from '../types';
+import type { ActiveCell } from '../context/RowContext';
+import type { HeaderMenuSlice } from '../hooks/useContextMenu';
+import type { ColumnDragSlice } from '../hooks/useColumns';
+import type { SortingSlice } from '../hooks/useSorting';
+
+type FilterLocalization = NonNullable<Localization['filter']>;
+
+function getTabIndex(untabbable: boolean): number {
+	return untabbable ? -1 : 0;
+}
+
+function getAriaSort(
+	disableSort: boolean,
+	sortActive: boolean,
+	columnSortDirection: SortOrder,
+): React.AriaAttributes['aria-sort'] {
+	if (disableSort) {
+		return undefined;
+	}
+	if (!sortActive) {
+		return 'none';
+	}
+	return columnSortDirection === SortOrder.ASC ? 'ascending' : 'descending';
+}
 
 type TableColProps<T> = {
 	column: TableColumn<T>;
+	/** Referenced by the inline editor's aria-labelledby. */
+	nameId: string;
 	disabled: boolean;
 	draggingColumnId?: string | number;
-	sortIcon?: React.ReactNode;
-	pagination: boolean;
-	paginationServer: boolean;
-	persistSelectedOnSort: boolean;
-	selectedColumn: TableColumn<T>;
-	sortDirection: SortOrder;
-	sortServer: boolean;
-	selectableRowsVisibleOnly: boolean;
+	/** Sorting feature slice — areColPropsEqual does per-column checks within it. */
+	sorting: SortingSlice<T>;
 	filterValue: FilterState;
-	onSort: (action: SortAction<T>) => void;
+	filterLocalization: FilterLocalization;
 	onFilterChange: (columnId: string | number, filter: FilterState) => void;
-	onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragEnter: (e: React.DragEvent<HTMLDivElement>) => void;
-	onDragLeave: (e: React.DragEvent<HTMLDivElement>) => void;
+	getDistinctValues: (columnId: string | number) => string[];
+	/** Column drag/reorder feature slice — compared by reference in areColPropsEqual. */
+	columnDrag: ColumnDragSlice;
 	/** Width override from column resize — takes precedence over column.width */
 	resizedWidth?: number;
-	onResizeStart?: (columnId: string | number, e: React.MouseEvent) => void;
+	onResizeStart?: (columnId: string | number, e: React.PointerEvent, configuredMinWidth?: string) => void;
 	pinnedOffsets?: PinnedOffsets;
 	/** CSS grid placement styles — injected by DataTableHead when rendering in grouped-header grid mode */
 	gridStyle?: React.CSSProperties;
+	// Cell navigation: this header cell's column in the nav grid (header row is -1)
+	cellNavigation?: boolean;
+	activeCell?: ActiveCell | null;
+	navCol?: number;
+	/** Header context-menu feature slice — `null` when the feature is off.
+	 *  Compared by reference in areColPropsEqual. */
+	headerMenu?: HeaderMenuSlice<T>;
 };
 
 function TableCol<T>({
 	column,
+	nameId,
 	disabled,
 	draggingColumnId,
-	selectedColumn = {},
-	sortDirection,
-	sortIcon,
-	sortServer,
-	pagination,
-	paginationServer,
-	persistSelectedOnSort,
-	selectableRowsVisibleOnly,
+	sorting,
 	filterValue,
-	onSort,
+	filterLocalization,
 	onFilterChange,
-	onDragStart,
-	onDragOver,
-	onDragEnd,
-	onDragEnter,
-	onDragLeave,
+	getDistinctValues,
+	columnDrag,
 	resizedWidth,
 	onResizeStart,
 	pinnedOffsets,
 	gridStyle,
+	cellNavigation,
+	activeCell,
+	navCol,
+	headerMenu,
 }: TableColProps<T>): JSX.Element | null {
 	const customStyles = useStyles();
+	const {
+		sortDirection,
+		sortColumns,
+		sortMulti,
+		defaultSortDirection,
+		sortIcon,
+		sortServer,
+		pagination,
+		paginationServer,
+		persistSelectedOnSort,
+		selectableRowsVisibleOnly,
+		onSort,
+	} = sorting;
 
 	const [showTooltip, setShowTooltip] = React.useState(false);
 	const columnRef = React.useRef<HTMLDivElement | null>(null);
@@ -77,34 +112,38 @@ function TableCol<T>({
 		return null;
 	}
 
-	const handleSortChange = () => {
+	const handleSortChange = (additive: boolean) => {
 		if (!column.sortable && !column.selector) {
 			return;
 		}
 
-		let direction = sortDirection;
-
-		if (equalizeId(selectedColumn.id, column.id)) {
-			direction = sortDirection === SortOrder.ASC ? SortOrder.DESC : SortOrder.ASC;
-		}
-
 		onSort({
 			type: 'SORT_CHANGE',
-			sortDirection: direction,
 			selectedColumn: column,
+			additive: sortMulti && additive,
+			defaultSortDirection,
 			clearSelectedOnSort:
 				(pagination && paginationServer && !persistSelectedOnSort) || sortServer || selectableRowsVisibleOnly,
 		});
 	};
 
+	const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+		handleSortChange(event.ctrlKey || event.metaKey);
+	};
+
 	const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-		if (event.key === 'Enter') {
-			handleSortChange();
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			handleSortChange(event.ctrlKey || event.metaKey);
 		}
 	};
 
+	const sortIndex = sortColumns.findIndex(s => equalizeId(s.column.id, column.id));
+	const sortEntry = sortIndex === -1 ? undefined : sortColumns[sortIndex];
+	const columnSortDirection = sortEntry ? sortEntry.sortDirection : sortDirection;
+
 	const renderNativeSortIcon = (sortActive: boolean) => (
-		<NativeSortIcon sortActive={sortActive} sortDirection={sortDirection} />
+		<NativeSortIcon sortActive={sortActive} sortDirection={columnSortDirection} />
 	);
 
 	const renderCustomSortIcon = () => (
@@ -112,7 +151,7 @@ function TableCol<T>({
 			className={[
 				'rdt_sortIcon',
 				sortActive ? 'rdt_sortIconActive' : 'rdt_sortIconInactive',
-				sortDirection === SortOrder.ASC && 'rdt_sortIconAsc',
+				columnSortDirection === SortOrder.ASC && 'rdt_sortIconAsc',
 				'__rdt_custom_sort_icon__',
 			]
 				.filter(Boolean)
@@ -122,9 +161,25 @@ function TableCol<T>({
 		</span>
 	);
 
-	const sortActive = !!(column.sortable && equalizeId(selectedColumn.id, column.id));
+	const renderSortPriority = () =>
+		sortMulti && sortColumns.length > 1 && sortIndex !== -1 ? (
+			<span className="rdt_sortPriority" aria-hidden="true">
+				{sortIndex + 1}
+			</span>
+		) : null;
+
+	const sortActive = !!(column.sortable && sortIndex !== -1);
 	const disableSort = !column.sortable || disabled;
-	const tabIndex = disableSort ? -1 : 0;
+	const ariaSort = getAriaSort(disableSort, sortActive, columnSortDirection);
+	const isNavActive = !!cellNavigation && activeCell?.row === -1 && activeCell?.col === navCol;
+	const hasSortHandle = !!column.name && !disableSort;
+	// With cellNavigation the whole grid is one Tab stop (roving tabindex); otherwise
+	// only sortable headers are tabbable.
+	const tabIndex = cellNavigation ? getTabIndex(!isNavActive) : getTabIndex(disableSort);
+	// data-nav-row/col live on the outer cell (full column width) so the :focus-within
+	// ring spans the whole header, matching body gridcells — not just the inner sortable
+	// div, which is inset by header padding and would otherwise draw a narrower ring.
+	const outerNavAttributes = cellNavigation ? { 'data-nav-row': -1, 'data-nav-col': navCol } : undefined;
 	const nativeSortIconLeft = column.sortable && !sortIcon && !column.right;
 	const nativeSortIconRight = column.sortable && !sortIcon && column.right;
 	const customSortIconLeft = column.sortable && sortIcon && !column.right;
@@ -133,26 +188,13 @@ function TableCol<T>({
 	const isDragging = equalizeId(column.id, draggingColumnId);
 
 	// ── Column pinning ─────────────────────────────────────────────────────────
-	const pinMeta = getPinnedCellMeta(column, pinnedOffsets);
-	const pinnedStyle: React.CSSProperties = pinMeta.style.position === 'sticky' ? { ...pinMeta.style, zIndex: 2 } : {};
-	const pinnedClass = pinMeta.className;
+	const pinMeta = getPinnedCellMeta(column, pinnedOffsets, 2);
 
 	const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
 		if (column.reorder && typeof column.name === 'string') {
-			e.dataTransfer.effectAllowed = 'move';
-			const el = e.currentTarget as HTMLDivElement;
-			const rect = el.getBoundingClientRect();
-			const ghost = document.createElement('div');
-			ghost.className = 'rdt_dragGhost';
-			// Grip icon + column name
-			ghost.innerHTML = `<span class="rdt_dragGhostIcon" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><circle cx="5" cy="3.5" r="1.2"/><circle cx="11" cy="3.5" r="1.2"/><circle cx="5" cy="8" r="1.2"/><circle cx="11" cy="8" r="1.2"/><circle cx="5" cy="12.5" r="1.2"/><circle cx="11" cy="12.5" r="1.2"/></svg></span><span class="rdt_dragGhostLabel">${column.name}</span>`;
-			ghost.style.width = `${rect.width}px`;
-			ghost.style.height = `${rect.height}px`;
-			document.body.appendChild(ghost);
-			e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
-			setTimeout(() => document.body.removeChild(ghost), 0);
+			setDragGhost(e, column.name);
 		}
-		onDragStart(e);
+		columnDrag.onDragStart(e);
 	};
 
 	// Width: resized > column.width > auto from flex
@@ -164,7 +206,7 @@ function TableCol<T>({
 	return (
 		<CellExtended
 			data-column-id={column.id}
-			className={['rdt_TableCol', pinnedClass].filter(Boolean).join(' ')}
+			className={['rdt_TableCol', pinMeta.className].filter(Boolean).join(' ')}
 			$headCell
 			allowOverflow={column.allowOverflow}
 			button={column.button}
@@ -181,22 +223,32 @@ function TableCol<T>({
 			style={{
 				...(isDragging ? (customStyles.headCells?.draggingStyle as React.CSSProperties) : undefined),
 				...widthStyle,
-				...pinnedStyle,
-				...(pinnedStyle.position !== 'sticky' && { position: 'relative' }),
+				...pinMeta.style,
+				...(pinMeta.style.position !== 'sticky' && { position: 'relative' }),
 				...gridStyle,
 			}}
 			onDragStart={handleDragStart}
-			onDragOver={onDragOver}
-			onDragEnd={onDragEnd}
-			onDragEnter={onDragEnter}
-			onDragLeave={onDragLeave}
+			onDragOver={columnDrag.onDragOver}
+			onDragEnd={columnDrag.onDragEnd}
+			onDragEnter={columnDrag.onDragEnter}
+			onDragLeave={columnDrag.onDragLeave}
+			onPointerDown={column.reorder ? columnDrag.onPointerDown : undefined}
+			onContextMenu={headerMenu?.rightClick ? (e: React.MouseEvent) => headerMenu.onContextMenu(column, e) : undefined}
+			{...outerNavAttributes}
+			// The filter and menu buttons must sit inside the columnheader: a row may only own cells.
+			role="columnheader"
+			aria-sort={ariaSort}
+			data-nav-widget={cellNavigation && hasSortHandle ? 'true' : undefined}
+			tabIndex={cellNavigation && !hasSortHandle ? tabIndex : undefined}
 		>
 			{column.name && (
 				<div
+					id={nameId}
 					data-column-id={column.id}
 					data-sort-id={column.id}
-					role="columnheader"
-					tabIndex={tabIndex}
+					data-sort-handle={hasSortHandle ? 'true' : undefined}
+					role={hasSortHandle ? 'button' : undefined}
+					tabIndex={hasSortHandle ? tabIndex : undefined}
 					className={[
 						'rdt_TableCol_Sortable',
 						'rdt_columnSortable',
@@ -205,20 +257,12 @@ function TableCol<T>({
 					]
 						.filter(Boolean)
 						.join(' ')}
-					onClick={!disableSort ? handleSortChange : undefined}
+					onClick={!disableSort ? handleClick : undefined}
 					onKeyDown={!disableSort ? handleKeyDown : undefined}
-					aria-sort={
-						!disableSort
-							? sortActive
-								? sortDirection === SortOrder.ASC
-									? 'ascending'
-									: 'descending'
-								: 'none'
-							: undefined
-					}
 				>
 					{!disableSort && customSortIconRight && renderCustomSortIcon()}
 					{!disableSort && nativeSortIconRight && renderNativeSortIcon(sortActive)}
+					{!disableSort && column.right && renderSortPriority()}
 
 					{typeof column.name === 'string' ? (
 						<div
@@ -233,6 +277,7 @@ function TableCol<T>({
 						column.name
 					)}
 
+					{!disableSort && !column.right && renderSortPriority()}
 					{!disableSort && customSortIconLeft && renderCustomSortIcon()}
 					{!disableSort && nativeSortIconLeft && renderNativeSortIcon(sortActive)}
 				</div>
@@ -240,33 +285,112 @@ function TableCol<T>({
 			{column.filterable && column.id != null && (
 				<ColumnFilter
 					columnId={column.id}
+					columnName={typeof column.name === 'string' ? column.name : undefined}
 					filterValue={filterValue}
 					filterType={column.filterType}
+					options={filterLocalization}
 					onFilterChange={onFilterChange}
+					getDistinctValues={getDistinctValues}
 				/>
 			)}
+			{/* The menu button renders after the filter so it is always the outermost
+			    header control (flex order mirrors it automatically in RTL). */}
+			{headerMenu?.menuButton && (
+				<button
+					type="button"
+					className="rdt_kebabIcon"
+					aria-label={headerMenu.ariaLabel}
+					aria-haspopup="menu"
+					onClick={e => {
+						e.stopPropagation();
+						headerMenu.onMenuButtonClick(column, e);
+					}}
+					onPointerDown={e => e.stopPropagation()}
+				>
+					<MenuIcon />
+				</button>
+			)}
 			{onResizeStart && column.id != null && (
-				<div className="rdt_resizeHandle" onMouseDown={e => onResizeStart(column.id!, e)} aria-hidden="true" />
+				<div
+					className="rdt_resizeHandle"
+					onPointerDown={e => {
+						// Keep a resize gesture from also starting a column reorder on the cell.
+						e.stopPropagation();
+						onResizeStart(column.id!, e, column.minWidth);
+					}}
+					aria-hidden="true"
+				/>
 			)}
 		</CellExtended>
 	);
 }
 
 function areColPropsEqual<T>(prevProps: TableColProps<T>, nextProps: TableColProps<T>): boolean {
-	if (prevProps.column !== nextProps.column) return false;
-	const prevIsSelected = equalizeId(prevProps.selectedColumn.id, prevProps.column.id);
-	const nextIsSelected = equalizeId(nextProps.selectedColumn.id, nextProps.column.id);
-	if (prevIsSelected !== nextIsSelected) return false;
-	if (prevIsSelected && nextIsSelected && prevProps.sortDirection !== nextProps.sortDirection) return false;
+	if (prevProps.column !== nextProps.column) {
+		return false;
+	}
+	if (prevProps.nameId !== nextProps.nameId) {
+		return false;
+	}
+	if (prevProps.headerMenu !== nextProps.headerMenu) {
+		return false;
+	}
+	if (prevProps.columnDrag !== nextProps.columnDrag) {
+		return false;
+	}
+	// The sorting slice changes identity on every sort interaction — compare this
+	// column's slice of the sort state instead of the reference, so only columns
+	// whose active state, arrow direction, or priority badge changed re-render.
+	if (prevProps.sorting !== nextProps.sorting) {
+		const prevSort = prevProps.sorting;
+		const nextSort = nextProps.sorting;
+		if (prevSort.sortMulti !== nextSort.sortMulti) {
+			return false;
+		}
+		if (prevSort.sortIcon !== nextSort.sortIcon) {
+			return false;
+		}
+		const prevIdx = prevSort.sortColumns.findIndex(s => equalizeId(s.column.id, prevProps.column.id));
+		const nextIdx = nextSort.sortColumns.findIndex(s => equalizeId(s.column.id, nextProps.column.id));
+		if (prevIdx !== nextIdx) {
+			return false;
+		}
+		if (prevIdx !== -1 && prevSort.sortColumns[prevIdx].sortDirection !== nextSort.sortColumns[nextIdx].sortDirection) {
+			return false;
+		}
+		// Fallback direction for inactive columns — a change flips the hover arrow.
+		if (prevIdx === -1 && prevSort.sortDirection !== nextSort.sortDirection) {
+			return false;
+		}
+		// The priority badge shows only when more than one column is sorted; a flip across that
+		// threshold changes whether the badge renders even when this column's index is unchanged.
+		if (prevSort.sortMulti && prevSort.sortColumns.length !== nextSort.sortColumns.length) {
+			const prevMulti = prevSort.sortColumns.length > 1;
+			const nextMulti = nextSort.sortColumns.length > 1;
+			if (prevMulti !== nextMulti) {
+				return false;
+			}
+		}
+	}
 	if (prevProps.draggingColumnId !== nextProps.draggingColumnId) {
 		const prevIsDragging = equalizeId(prevProps.column.id, prevProps.draggingColumnId);
 		const nextIsDragging = equalizeId(nextProps.column.id, nextProps.draggingColumnId);
-		if (prevIsDragging !== nextIsDragging) return false;
+		if (prevIsDragging !== nextIsDragging) {
+			return false;
+		}
 	}
-	if (prevProps.filterValue !== nextProps.filterValue) return false;
-	if (prevProps.resizedWidth !== nextProps.resizedWidth) return false;
-	if (prevProps.disabled !== nextProps.disabled) return false;
-	if (prevProps.sortIcon !== nextProps.sortIcon) return false;
+	if (prevProps.filterValue !== nextProps.filterValue) {
+		return false;
+	}
+	if (prevProps.filterLocalization !== nextProps.filterLocalization) {
+		return false;
+	}
+	if (prevProps.resizedWidth !== nextProps.resizedWidth) {
+		return false;
+	}
+	if (prevProps.disabled !== nextProps.disabled) {
+		return false;
+	}
 	if (prevProps.pinnedOffsets !== nextProps.pinnedOffsets) {
 		// Re-render when:
 		// 1. This column's own offset changed (resize, reorder).
@@ -278,19 +402,41 @@ function areColPropsEqual<T>(prevProps: TableColProps<T>, nextProps: TableColPro
 		const nextLeft = nextProps.pinnedOffsets?.left[id!];
 		const prevRight = prevProps.pinnedOffsets?.right[id!];
 		const nextRight = nextProps.pinnedOffsets?.right[id!];
-		if (prevLeft !== nextLeft || prevRight !== nextRight) return false;
+		if (prevLeft !== nextLeft || prevRight !== nextRight) {
+			return false;
+		}
 
 		const prevLeftKeys = prevProps.pinnedOffsets ? Object.keys(prevProps.pinnedOffsets.left).length : 0;
 		const nextLeftKeys = nextProps.pinnedOffsets ? Object.keys(nextProps.pinnedOffsets.left).length : 0;
 		const prevRightKeys = prevProps.pinnedOffsets ? Object.keys(prevProps.pinnedOffsets.right).length : 0;
 		const nextRightKeys = nextProps.pinnedOffsets ? Object.keys(nextProps.pinnedOffsets.right).length : 0;
-		if (prevLeftKeys !== nextLeftKeys || prevRightKeys !== nextRightKeys) return false;
+		if (prevLeftKeys !== nextLeftKeys || prevRightKeys !== nextRightKeys) {
+			return false;
+		}
 	}
 	const pg = prevProps.gridStyle;
 	const ng = nextProps.gridStyle;
 	if (pg !== ng) {
-		if (!pg || !ng) return false;
-		if (pg.gridColumn !== ng.gridColumn || pg.gridRow !== ng.gridRow) return false;
+		if (!pg || !ng) {
+			return false;
+		}
+		if (pg.gridColumn !== ng.gridColumn || pg.gridRow !== ng.gridRow) {
+			return false;
+		}
+	}
+	if (prevProps.cellNavigation !== nextProps.cellNavigation) {
+		return false;
+	}
+	if (prevProps.navCol !== nextProps.navCol) {
+		return false;
+	}
+	// Only re-render for active-cell changes that flip this header's Tab-stop state.
+	const prevNavActive =
+		!!prevProps.cellNavigation && prevProps.activeCell?.row === -1 && prevProps.activeCell?.col === prevProps.navCol;
+	const nextNavActive =
+		!!nextProps.cellNavigation && nextProps.activeCell?.row === -1 && nextProps.activeCell?.col === nextProps.navCol;
+	if (prevNavActive !== nextNavActive) {
+		return false;
 	}
 	return true;
 }

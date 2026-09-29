@@ -3,6 +3,8 @@ import DocsLayout from '../../layouts/DocsLayout.astro';
 import Demo from '../../components/Demo.astro';
 import CodeBlock from '../../components/CodeBlock.astro';
 import FixedHeaderDemo from '../../components/demos/FixedHeaderDemo.tsx';
+import OnScrollDemo from '../../components/demos/OnScrollDemo.tsx';
+import PropsTable from '../../components/PropsTable.astro';
 ---
 
 <DocsLayout title="Fixed header | react-data-table-component">
@@ -16,25 +18,30 @@ import FixedHeaderDemo from '../../components/demos/FixedHeaderDemo.tsx';
 
   <Demo
     title="Fixed header"
-    description="40 rows in a scrollable container. Toggle fixed header on/off and change the scroll height with the controls above the table."
+    description="40 rows and ~1160px of columns. By default wide content scrolls horizontally inside the table. Turn fixedHeader off to unlock the disable-responsive checkbox: with both off, the table overflows the demo card instead of scrolling. While fixedHeader is on the checkbox is disabled, since fixedHeader always creates a scroll container."
     code={`import DataTable, { type TableColumn } from 'react-data-table-component';
 
 const columns: TableColumn<Employee>[] = [
-  { name: '#',          selector: r => r.id,         width: '60px' },
-  { name: 'Name',       selector: r => r.name,       sortable: true },
+  { name: '#', selector: r => r.id, width: '60px' },
+  { name: 'Name', selector: r => r.name, sortable: true },
   { name: 'Department', selector: r => r.department, sortable: true },
-  { name: 'Salary',     selector: r => r.salary,     sortable: true,
-    right: true, format: r => \`$\${r.salary.toLocaleString()}\` },
-  { name: 'Status',     selector: r => r.status },
+  {
+    name: 'Salary',
+    selector: r => r.salary,
+    sortable: true,
+    right: true,
+    format: r => \`$\${r.salary.toLocaleString()}\`,
+  },
+  { name: 'Status', selector: r => r.status },
 ];
 
 <DataTable
   columns={columns}
-  data={data}           // large dataset
+  data={data} // large dataset
   fixedHeader
   fixedHeaderScrollHeight="300px"
   highlightOnHover
-/>`}
+/>;`}
   >
     <FixedHeaderDemo client:load />
   </Demo>
@@ -52,6 +59,44 @@ const columns: TableColumn<Employee>[] = [
     continues to work normally. Both axes scroll together, but the header sticks on the vertical axis.
   </p>
 
+  <h2 id="responsive-false">Turning the scroll container off</h2>
+
+  <p>
+    <code>responsive={`{false}`}</code> removes the table's own horizontal scroll container, letting
+    wide content overflow into the parent instead. It exists for a few specific situations:
+  </p>
+
+  <ul>
+    <li>
+      <strong>Parent-owned scrolling.</strong> The table sits inside your own scroll container
+      (a dashboard panel, a split view, several tables sharing one horizontal scrollbar). Nesting
+      the table's <code>overflow-x: auto</code> inside yours would produce scrollbars within
+      scrollbars.
+    </li>
+    <li>
+      <strong>Print and PDF export.</strong> An overflow container clips everything past the fold;
+      disabling it lets the full table width render in print stylesheets.
+    </li>
+    <li>
+      <strong>Table dictates layout.</strong> You want the page itself to widen or scroll rather
+      than the table.
+    </li>
+  </ul>
+
+  <CodeBlock code={`<div className="my-own-scroll-container">
+  <DataTable columns={columns} data={data} responsive={false} />
+  <OtherWidgetSharingTheScroll />
+</div>;`} />
+
+  <p>
+    <strong>Trade-offs:</strong> features that rely on the table's own scrollport degrade. Pinned
+    columns stick against whatever scroll container the parent provides, which usually works, but
+    the custom pinned-columns scrollbar does not render, and the native one is left visible instead.
+    <code>fixedHeader</code> still creates a vertical scroll container regardless, since a height
+    cap without overflow is meaningless. Leave <code>responsive</code> on (the default) unless one
+    of the cases above applies.
+  </p>
+
   <h2>With pagination</h2>
   <p>
     Fixed header and pagination work together without any extra configuration. The scroll height
@@ -66,7 +111,7 @@ const columns: TableColumn<Employee>[] = [
   fixedHeaderScrollHeight="400px"
   pagination
   paginationPerPage={20}
-/>`} />
+/>;`} />
 
   <h2>With selection</h2>
   <p>
@@ -74,42 +119,36 @@ const columns: TableColumn<Employee>[] = [
     checkbox remains accessible at the top of the scrollable area.
   </p>
 
-  <CodeBlock code={`<DataTable
+  <CodeBlock code={`<DataTable columns={columns} data={data} fixedHeader fixedHeaderScrollHeight="350px" selectableRows />;`} />
+
+  <h2>Tracking scroll position with <code>onScroll</code></h2>
+  <p>
+    The <code>onScroll</code> prop fires on every scroll event inside the table body. It receives a
+    standard <code>React.UIEvent&lt;HTMLDivElement&gt;</code> so you can read <code>scrollTop</code>,
+    <code>scrollLeft</code>, or any other scroll geometry from <code>event.target</code>.
+  </p>
+
+  <Demo
+    title="onScroll"
+    description="Scroll the table body — the current scrollTop value updates in real time."
+    code={`const [scrollTop, setScrollTop] = useState(0);
+
+<DataTable
   columns={columns}
   data={data}
   fixedHeader
-  fixedHeaderScrollHeight="350px"
-  selectableRows
-/>`} />
+  fixedHeaderScrollHeight="300px"
+  onScroll={e => setScrollTop(Math.round((e.target as HTMLDivElement).scrollTop))}
+/>;`}
+  >
+    <OnScrollDemo client:load />
+  </Demo>
 
   <h2>Prop reference</h2>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Prop</th>
-        <th>Type</th>
-        <th>Default</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>fixedHeader</code></td>
-        <td><code>boolean</code></td>
-        <td><code>false</code></td>
-        <td>Stick column headers to the top of the scroll container.</td>
-      </tr>
-      <tr>
-        <td><code>fixedHeaderScrollHeight</code></td>
-        <td><code>string</code></td>
-        <td><code>"100vh"</code></td>
-        <td>
-          Any valid CSS length (<code>px</code>, <code>vh</code>, <code>%</code>, etc.).
-          Sets the <code>max-height</code> of the scrollable body region.
-          Only applies when <code>fixedHeader</code> is <code>true</code>.
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  <PropsTable feature="fixed-header" columns={['prop', 'type', 'default', 'description']} />
+
+  <p>
+    See it combined with other features in the <a href="/docs/recipes/audit-log">Audit log viewer</a> recipe.
+  </p>
 </DocsLayout>
